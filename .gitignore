@@ -1,0 +1,8 @@
+node_modules/
+.next/
+.env*
+!.env.example
+.secrets/
+*.tsbuildinfo
+AGENTS.md
+.DS_Store

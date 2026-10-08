@@ -1,0 +1,24 @@
+# Automator — Decision Log
+
+This is a dated record of choices, not a backlog. `product.md` controls purpose and scope; `architecture.md` controls technical decisions. A proposal from an earlier chat is not a requirement unless it appears in those documents or in this log as an accepted decision. Unresolved items remain **Open**.
+
+| Date | Decision and reason | Replaced or ruled out |
+| --- | --- | --- |
+| 2026-10-06 | Build a working portfolio product for a concrete consultation-request workflow. A useful, explainable service is the hiring signal. | Kinetk's broad, resume-first project idea and a generic Zapier clone. |
+| 2026-10-06 | Limit the MVP to Google Forms as a trigger and Google Calendar and Gmail as actions. This is enough to demonstrate an end-to-end automation. | The earlier five-integration list that also included Sheets and Drive. |
+| 2026-10-06 | Use a plain landing page, home page, and step-by-step builder with run history. Spend effort on execution before visual polish. | Rebuilding the real-time collaborative canvas or a drag-and-drop editor now. |
+| 2026-10-06 | Support a simple equality Filter in the reference flow. Keep field mapping limited to what that flow needs. | A general rules engine or arbitrary workflow graph in the MVP. |
+| 2026-10-06 | Poll Forms responses, persist a cursor, and deduplicate by response ID. It is the smaller first implementation and can still process every response returned between checks. | Cloud Pub/Sub watches, watch renewal, and near-real-time notifications for the MVP. |
+| 2026-10-06 | Use one developer-controlled Google account for the MVP. Google authorization is still required; choose an established app-auth solution when multi-user access is added. | Building custom app login before the automation works or treating a fake login as production auth. |
+| 2026-10-06 | Gmail is a send-only, plain-text action from the authorized primary address. Support recipient, subject, and body; record Gmail's response. | Inbox triggers, HTML, attachments, aliases, campaigns, and a MIME parser. |
+| 2026-10-06 | When Calendar succeeds and Gmail fails, retain the event, mark the run partially failed, and allow a Gmail-only retry. Show uncertainty before a retry that might duplicate an email. | Rolling back the Calendar event or rerunning the full workflow. |
+| 2026-10-06 | Use TypeScript, Next.js/React, Tailwind, PostgreSQL, and one Node worker in a single codebase. Durable execution needs a process independent of a browser or web request. | A frontend-only demonstration, microservices, or an upfront general-purpose queue. |
+| 2026-10-06 | Implement in reviewable milestones. Milestone 01 proves Forms ingestion and durable run visibility before Calendar and Gmail actions. | Building every integration and workflow tool in one pass. |
+| 2026-10-06 | Confirm Filter as an MVP step and remove its duplicate post-MVP listing. The reference workflow and acceptance criteria already require it. | The inconsistent post-MVP Filter entry. |
+| 2026-10-06 | Use `pg` for direct PostgreSQL access and `googleapis` for Google OAuth and API calls. Both cover the small MVP without an ORM or custom Google HTTP client. | Leaving library selection open in the architecture while the first milestone specified both packages. |
+
+## Open and changed scope
+
+- `product.md` also mentions a post-MVP Schedule tool. No behavior or priority has been decided for it.
+- Hosting, public OAuth verification, the app-auth provider, exact Form date/time fields, event duration, and the remaining technical choices marked **Open** in `architecture.md` are not requirements yet.
+- Record future changes as a new dated row explaining the reason and what changed. Do not rewrite earlier decisions to hide the change.
