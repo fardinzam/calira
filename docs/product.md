@@ -83,7 +83,8 @@ The MVP is complete when all of the following can be demonstrated with a develop
 
 ## Post-MVP expansion
 
-After the core workflow is dependable, compare established auth solutions such as Better Auth and Supabase, then add real app accounts and account-specific Google connections. After, add workflow tools in this order as they prove useful: 
+After the core workflow is dependable, compare established auth solutions such as Better Auth and Supabase, then add real app accounts and account-specific Google connections. After, add workflow tools in this order as they prove useful:
+
 - Delay: wait to send data to an app by holding actions for a set time.
 - Human in the Loop: complete a manual action during a run.
 - Looping: run all following steps repeatedly.

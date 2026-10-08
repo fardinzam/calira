@@ -25,6 +25,8 @@ async function main() {
 }
 
 main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : "Database migration failed");
+  console.error(
+    error instanceof Error ? error.message : "Database migration failed",
+  );
   process.exitCode = 1;
 });

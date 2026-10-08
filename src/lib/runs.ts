@@ -40,7 +40,13 @@ export async function insertRunIfAbsent(
      VALUES ($1, $2, $3, $4, $5::jsonb)
      ON CONFLICT (workflow_id, response_id) DO NOTHING
      RETURNING id`,
-    [workflowId, response.responseId, response.createTime, response.lastSubmittedTime, JSON.stringify(response.answers)],
+    [
+      workflowId,
+      response.responseId,
+      response.createTime,
+      response.lastSubmittedTime,
+      JSON.stringify(response.answers),
+    ],
   );
   return result.rowCount === 1;
 }

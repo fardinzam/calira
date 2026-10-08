@@ -5,6 +5,7 @@ Record incidents and decisions close to when they happen. These are raw facts to
 Useful tags: `hard-problem`, `debugging`, `trade-off`, `reliability`, `scope`, `ownership`, `changed-opinion`, `security`, `feedback`, `ai-use`.
 
 ## 2026-10-06 Reframed Kinetk as a focused automation product
+
 Tags: scope, changed-opinion, ownership, ai-use
 
 Context: Kinetk began from a ChatGPT suggestion for a resume project. Most effort went into a real-time multi-user node canvas.
@@ -17,6 +18,7 @@ What I would do differently: Define the intended user and job-to-be-done before 
 Links: [product scope](./product.md), [decision log](./decisions.md)
 
 ## 2026-10-06 Chose Forms polling for the first trigger
+
 Tags: hard-problem, trade-off, reliability, changed-opinion
 
 Context: A Form submission must start a workflow without losing submissions or running the same response twice.
@@ -29,6 +31,7 @@ What I would do differently: Revisit push notifications if measured polling dela
 Links: [architecture](./architecture.md), [Milestone 01 plan](./01-milestone.md), [Forms responses API](https://developers.google.com/workspace/forms/api/reference/rest/v1/forms.responses/list), [Forms notification guide](https://developers.google.com/workspace/forms/api/guides/push-notifications)
 
 ## 2026-10-06 Simplified the Gmail action after feedback
+
 Tags: trade-off, feedback, reliability, ai-use
 
 Context: Gmail is an action after Calendar creation in the reference workflow.
@@ -54,6 +57,7 @@ Links: [product scope](./product.md), [architecture](./architecture.md), [decisi
 
 ```markdown
 ## [Date] Short incident or decision title
+
 Tags: debugging, trade-off, reliability
 
 Context:

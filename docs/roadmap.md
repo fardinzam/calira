@@ -4,12 +4,12 @@
 
 ## Sequence
 
-| Milestone | Reviewable result |
-| --- | --- |
-| **01 — Forms ingestion and run visibility** | A new Form submission appears once as a durable `queued` run in the simple app. |
-| **02 — Complete workflow configuration** | The owner can configure and save the reference Forms → Filter → Calendar → Gmail workflow through a simple builder, with invalid configuration rejected before enablement. |
-| **03 — Working automation** | A qualifying response passes Filter, creates one Calendar event, sends one plain-text Gmail acknowledgement, and shows step results; a nonqualifying response is filtered out. |
-| **04 — Failure recovery and MVP verification** | Failures, partial runs, safe retries, restart recovery, and the complete user journey meet every product acceptance criterion. |
+| Milestone                                      | Reviewable result                                                                                                                                                              |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **01 — Forms ingestion and run visibility**    | A new Form submission appears once as a durable `queued` run in the simple app.                                                                                                |
+| **02 — Complete workflow configuration**       | The owner can configure and save the reference Forms → Filter → Calendar → Gmail workflow through a simple builder, with invalid configuration rejected before enablement.     |
+| **03 — Working automation**                    | A qualifying response passes Filter, creates one Calendar event, sends one plain-text Gmail acknowledgement, and shows step results; a nonqualifying response is filtered out. |
+| **04 — Failure recovery and MVP verification** | Failures, partial runs, safe retries, restart recovery, and the complete user journey meet every product acceptance criterion.                                                 |
 
 ### Milestone 01 — Forms ingestion and run visibility
 
@@ -69,17 +69,17 @@
 
 ## Acceptance-criterion coverage
 
-| `product.md` criterion | Completed by |
-| --- | --- |
-| 1. Configure, save, enable, disable through the builder | 02; verified end to end in 04 |
-| 2. Qualifying response creates event and acknowledgement | 03; verified end to end in 04 |
-| 3. Recheck creates no duplicate run/event/email | 01 for run identity; 04 for external actions |
-| 4. Filtered response creates no event or email | 03 |
-| 5. Invalid required values fail visibly before action | 02 for configuration; 03 for response data |
-| 6. Run detail shows every step result or error | 03; failure cases completed in 04 |
-| 7. Calendar retained after Gmail failure; Gmail-only retry | 04 |
-| 8. Uncertain Gmail outcome shown before manual retry | 04 |
-| 9. Processing survives app/worker restart | 01 for ingestion; 04 for full execution |
+| `product.md` criterion                                     | Completed by                                 |
+| ---------------------------------------------------------- | -------------------------------------------- |
+| 1. Configure, save, enable, disable through the builder    | 02; verified end to end in 04                |
+| 2. Qualifying response creates event and acknowledgement   | 03; verified end to end in 04                |
+| 3. Recheck creates no duplicate run/event/email            | 01 for run identity; 04 for external actions |
+| 4. Filtered response creates no event or email             | 03                                           |
+| 5. Invalid required values fail visibly before action      | 02 for configuration; 03 for response data   |
+| 6. Run detail shows every step result or error             | 03; failure cases completed in 04            |
+| 7. Calendar retained after Gmail failure; Gmail-only retry | 04                                           |
+| 8. Uncertain Gmail outcome shown before manual retry       | 04                                           |
+| 9. Processing survives app/worker restart                  | 01 for ingestion; 04 for full execution      |
 
 ## Decisions before execution
 

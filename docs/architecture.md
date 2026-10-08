@@ -6,27 +6,27 @@ This document records the technical decisions for the MVP defined in [product.md
 
 ## Chosen stack
 
-| Part | Choice | Reason |
-| --- | --- | --- |
-| Language | TypeScript | One language across UI, API, and worker; matches the existing project preference. |
-| Web app | Next.js with React | Supports the small landing page, builder, run views, and server endpoints in one app. |
-| Styling | Tailwind CSS | Standard utilities are sufficient for the deliberately plain interface. |
-| Background execution | One Node.js worker process in the same codebase | Forms polling and workflow runs must continue without a browser tab or web request and recover after an app restart. |
-| Durable storage | PostgreSQL | Persists workflows, poll progress, runs, and step outcomes; unique constraints and transactions support duplicate prevention. |
-| Database access | `pg` | A direct PostgreSQL client is sufficient for the small number of MVP queries; no ORM is needed yet. |
-| Google access | Official Google APIs through `googleapis` | Uses a maintained Node client for OAuth token refresh and the three API integrations instead of custom HTTP plumbing. |
+| Part                 | Choice                                          | Reason                                                                                                                        |
+| -------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Language             | TypeScript                                      | One language across UI, API, and worker; matches the existing project preference.                                             |
+| Web app              | Next.js with React                              | Supports the small landing page, builder, run views, and server endpoints in one app.                                         |
+| Styling              | Tailwind CSS                                    | Standard utilities are sufficient for the deliberately plain interface.                                                       |
+| Background execution | One Node.js worker process in the same codebase | Forms polling and workflow runs must continue without a browser tab or web request and recover after an app restart.          |
+| Durable storage      | PostgreSQL                                      | Persists workflows, poll progress, runs, and step outcomes; unique constraints and transactions support duplicate prevention. |
+| Database access      | `pg`                                            | A direct PostgreSQL client is sufficient for the small number of MVP queries; no ORM is needed yet.                           |
+| Google access        | Official Google APIs through `googleapis`       | Uses a maintained Node client for OAuth token refresh and the three API integrations instead of custom HTTP plumbing.         |
 
 The web app and worker are two processes sharing one database and the small set of workflow and Google action code they need. There is no separate message broker, distributed scheduler, general node graph engine, or service layer in the MVP. The worker can claim pending runs from PostgreSQL. Its exact hosting and process supervision are **Open** until deployment is planned.
 
 ## Component boundaries
 
-| Component | Responsibility | Does not do |
-| --- | --- | --- |
-| Web UI and server endpoints | Validate and save workflow configuration; display workflows and runs; accept explicit Gmail retry requests. | Poll Forms or execute long-running actions inside a request. |
-| Forms poller (worker) | Check enabled Forms, persist unseen responses as runs, and advance poll progress safely. | Perform Calendar or Gmail actions while fetching pages. |
-| Run executor (worker) | Claim one queued run, evaluate Filter, validate mapped data, execute Calendar then Gmail, and record each result. | Interpret arbitrary graphs or expressions. |
-| Google API code | Make the specific Forms list, Calendar insert/get, and Gmail send calls; classify API errors. | Decide workflow state or silently retry side effects. |
-| PostgreSQL | Hold configuration, response identity, execution progress, and result IDs. | Store Gmail inbox contents or become a general event store. |
+| Component                   | Responsibility                                                                                                    | Does not do                                                  |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Web UI and server endpoints | Validate and save workflow configuration; display workflows and runs; accept explicit Gmail retry requests.       | Poll Forms or execute long-running actions inside a request. |
+| Forms poller (worker)       | Check enabled Forms, persist unseen responses as runs, and advance poll progress safely.                          | Perform Calendar or Gmail actions while fetching pages.      |
+| Run executor (worker)       | Claim one queued run, evaluate Filter, validate mapped data, execute Calendar then Gmail, and record each result. | Interpret arbitrary graphs or expressions.                   |
+| Google API code             | Make the specific Forms list, Calendar insert/get, and Gmail send calls; classify API errors.                     | Decide workflow state or silently retry side effects.        |
+| PostgreSQL                  | Hold configuration, response identity, execution progress, and result IDs.                                        | Store Gmail inbox contents or become a general event store.  |
 
 Keep these as straightforward modules in one codebase. A boundary is useful only where it separates a concrete responsibility or makes an external API testable.
 
@@ -34,25 +34,25 @@ Keep these as straightforward modules in one codebase. A boundary is useful only
 
 These are logical records, not a commitment to a particular ORM or exact SQL column names.
 
-| Record | Required data and constraints |
-| --- | --- |
-| `workflow` | ID, name, enabled flag, Form ID, Calendar ID, provider time zone, selected Form question IDs, Filter value, Calendar field mapping, Gmail recipient/subject/body mapping, creation/update times, and latest enable time. The configuration is limited to the reference flow and fixed step order. |
-| `form_poll_state` | Workflow ID, last fully persisted response timestamp, last successful check time, and optional last error. One row per workflow. |
-| `run` | ID, workflow ID, Form response ID, submission timestamp, response data needed by the workflow, configuration snapshot, run state, timestamps, and error summary. Unique `(workflow_id, form_response_id)` prevents a second run for the same submission. |
-| `step_run` | Run ID, fixed step name (`filter`, `calendar`, `gmail`), state, attempt count, start/end times, safe error details, and external Calendar event or Gmail message ID after success. Unique `(run_id, step_name)`. |
+| Record            | Required data and constraints                                                                                                                                                                                                                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workflow`        | ID, name, enabled flag, Form ID, Calendar ID, provider time zone, selected Form question IDs, Filter value, Calendar field mapping, Gmail recipient/subject/body mapping, creation/update times, and latest enable time. The configuration is limited to the reference flow and fixed step order. |
+| `form_poll_state` | Workflow ID, last fully persisted response timestamp, last successful check time, and optional last error. One row per workflow.                                                                                                                                                                  |
+| `run`             | ID, workflow ID, Form response ID, submission timestamp, response data needed by the workflow, configuration snapshot, run state, timestamps, and error summary. Unique `(workflow_id, form_response_id)` prevents a second run for the same submission.                                          |
+| `step_run`        | Run ID, fixed step name (`filter`, `calendar`, `gmail`), state, attempt count, start/end times, safe error details, and external Calendar event or Gmail message ID after success. Unique `(run_id, step_name)`.                                                                                  |
 
 The run keeps a configuration snapshot so changing a workflow cannot change an in-progress run or its retry. Store only the Form answers needed for execution and run inspection. Google access and refresh tokens are secrets, not workflow configuration; for the single-owner MVP they are provided to the server/worker through a local or deployment secret store, never committed to Git or sent to the browser. The token-at-rest mechanism for later multi-user accounts is **Open**.
 
 ## Run states and step states
 
-| Run state | Meaning |
-| --- | --- |
-| `queued` | Response is recorded; execution has not started. |
-| `running` | Worker has claimed the run and is evaluating or calling an action. |
-| `filtered_out` | Filter did not match; no Calendar or Gmail call is made. Terminal. |
-| `succeeded` | Calendar and Gmail APIs accepted the actions. Terminal. This does not prove email delivery. |
-| `failed` | Run stopped before a confirmed successful external action, including invalid data or authorization failure. If a Calendar insert cannot be reconciled, show that its outcome is uncertain and require review. |
-| `partially_failed` | Calendar succeeded, but Gmail failed or its outcome is uncertain. Calendar is not rolled back. Gmail may be retried under the rules below. |
+| Run state          | Meaning                                                                                                                                                                                                       |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `queued`           | Response is recorded; execution has not started.                                                                                                                                                              |
+| `running`          | Worker has claimed the run and is evaluating or calling an action.                                                                                                                                            |
+| `filtered_out`     | Filter did not match; no Calendar or Gmail call is made. Terminal.                                                                                                                                            |
+| `succeeded`        | Calendar and Gmail APIs accepted the actions. Terminal. This does not prove email delivery.                                                                                                                   |
+| `failed`           | Run stopped before a confirmed successful external action, including invalid data or authorization failure. If a Calendar insert cannot be reconciled, show that its outcome is uncertain and require review. |
+| `partially_failed` | Calendar succeeded, but Gmail failed or its outcome is uncertain. Calendar is not rolled back. Gmail may be retried under the rules below.                                                                    |
 
 Step states are `pending`, `running`, `succeeded`, `skipped`, `failed`, and `uncertain`. `uncertain` means an external action may have happened but its result could not be confirmed. The UI must show this and warn before any manual repeat. A run with a successful Calendar step and an uncertain Gmail step is `partially_failed`.
 

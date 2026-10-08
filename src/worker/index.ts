@@ -1,7 +1,11 @@
 import { access } from "node:fs/promises";
 
 async function main() {
-  for (const name of ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_TOKEN_FILE"] as const) {
+  for (const name of [
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
+    "GOOGLE_TOKEN_FILE",
+  ] as const) {
     if (!process.env[name]) {
       throw new Error(`Missing ${name}`);
     }

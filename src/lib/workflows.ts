@@ -43,7 +43,10 @@ function toWorkflow(row: WorkflowRow): Workflow {
   };
 }
 
-export async function saveWorkflow(input: { name: string; formId: string }, db: Pool = getDb()): Promise<Workflow> {
+export async function saveWorkflow(
+  input: { name: string; formId: string },
+  db: Pool = getDb(),
+): Promise<Workflow> {
   const name = typeof input.name === "string" ? input.name.trim() : "";
   const formId = typeof input.formId === "string" ? input.formId.trim() : "";
   if (!name) throw new Error("Workflow name is required");
@@ -57,8 +60,14 @@ export async function saveWorkflow(input: { name: string; formId: string }, db: 
       [name, formId],
     );
     const id = saved.rows[0].id;
-    await client.query("INSERT INTO form_poll_state (workflow_id) VALUES ($1)", [id]);
-    const result = await client.query<WorkflowRow>(`${selectWorkflows} WHERE w.id = $1`, [id]);
+    await client.query(
+      "INSERT INTO form_poll_state (workflow_id) VALUES ($1)",
+      [id],
+    );
+    const result = await client.query<WorkflowRow>(
+      `${selectWorkflows} WHERE w.id = $1`,
+      [id],
+    );
     await client.query("COMMIT");
     return toWorkflow(result.rows[0]);
   } catch (error) {
@@ -87,9 +96,15 @@ export async function setWorkflowEnabled(
     );
     if (updated.rowCount === 0) throw new Error("Workflow not found");
     if (enabled) {
-      await client.query("UPDATE form_poll_state SET cursor_at = $2 WHERE workflow_id = $1", [id, now]);
+      await client.query(
+        "UPDATE form_poll_state SET cursor_at = $2 WHERE workflow_id = $1",
+        [id, now],
+      );
     }
-    const result = await client.query<WorkflowRow>(`${selectWorkflows} WHERE w.id = $1`, [id]);
+    const result = await client.query<WorkflowRow>(
+      `${selectWorkflows} WHERE w.id = $1`,
+      [id],
+    );
     await client.query("COMMIT");
     return toWorkflow(result.rows[0]);
   } catch (error) {
@@ -101,11 +116,15 @@ export async function setWorkflowEnabled(
 }
 
 export async function listWorkflows(db: Pool = getDb()): Promise<Workflow[]> {
-  const result = await db.query<WorkflowRow>(`${selectWorkflows} ORDER BY w.created_at DESC, w.id DESC`);
+  const result = await db.query<WorkflowRow>(
+    `${selectWorkflows} ORDER BY w.created_at DESC, w.id DESC`,
+  );
   return result.rows.map(toWorkflow);
 }
 
-export async function listEnabledWorkflows(db: Pool = getDb()): Promise<Workflow[]> {
+export async function listEnabledWorkflows(
+  db: Pool = getDb(),
+): Promise<Workflow[]> {
   const result = await db.query<WorkflowRow>(
     `${selectWorkflows} WHERE w.enabled = true ORDER BY w.created_at DESC, w.id DESC`,
   );
