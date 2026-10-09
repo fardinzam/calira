@@ -185,7 +185,11 @@ test("revoked Google credentials require reconnect without exposing response det
 test("default Google client calls responses.list with its method receiver", async () => {
   const directory = await mkdtemp(join(tmpdir(), "automator-forms-"));
   const tokenFile = join(directory, "token.json");
-  await writeFile(tokenFile, JSON.stringify({ refresh_token: "fixture-refresh-token" }), { mode: 0o600 });
+  await writeFile(
+    tokenFile,
+    JSON.stringify({ refresh_token: "fixture-refresh-token" }),
+    { mode: 0o600 },
+  );
   const savedEnv = { ...process.env };
   const originalForms = google.forms;
   try {
@@ -203,7 +207,9 @@ test("default Google client calls responses.list with its method receiver", asyn
         },
       },
     })) as unknown as typeof google.forms;
-    assert.deepEqual(await listFormResponses("form-1", new Date(0)), { responses: [] });
+    assert.deepEqual(await listFormResponses("form-1", new Date(0)), {
+      responses: [],
+    });
   } finally {
     google.forms = originalForms;
     process.env = savedEnv;
