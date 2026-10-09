@@ -1,26 +1,45 @@
-import { access } from "node:fs/promises";
+import { setTimeout } from "node:timers/promises";
+import { getDb } from "../lib/db";
+import { getGoogleAuth } from "../lib/google/auth";
+import { listFormResponses } from "../lib/google/forms";
+import { pollEnabledWorkflows } from "./poll-forms";
+
+async function pollOnce() {
+  return pollEnabledWorkflows({ listFormResponses }, getDb());
+}
 
 async function main() {
-  for (const name of [
-    "GOOGLE_CLIENT_ID",
-    "GOOGLE_CLIENT_SECRET",
-    "GOOGLE_TOKEN_FILE",
-  ] as const) {
-    if (!process.env[name]) {
-      throw new Error(`Missing ${name}`);
+  await getGoogleAuth();
+  if (process.argv.includes("--once")) {
+    try {
+      const failure = await pollOnce();
+      if (failure) {
+        console.error(failure);
+        process.exitCode = 1;
+      }
+    } finally {
+      await getDb().end();
     }
+    return;
   }
 
-  try {
-    await access(process.env.GOOGLE_TOKEN_FILE!);
-  } catch {
-    throw new Error("GOOGLE_TOKEN_FILE is not readable");
+  while (true) {
+    try {
+      const failure = await pollOnce();
+      if (failure) console.error(failure);
+    } catch {
+      console.error("Forms polling failed; retrying next cycle");
+    }
+    await setTimeout(60_000);
   }
-
-  throw new Error("Forms polling is not implemented until Task 4");
 }
 
 main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : "Worker failed");
+  const message = error instanceof Error ? error.message : "Worker failed";
+  console.error(
+    /^(Missing GOOGLE_|GOOGLE_TOKEN_FILE)/.test(message)
+      ? message
+      : "Forms polling failed",
+  );
   process.exitCode = 1;
 });

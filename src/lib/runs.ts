@@ -1,4 +1,4 @@
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { getDb } from "./db";
 
 export type FormResponse = {
@@ -33,7 +33,7 @@ type RunRow = {
 export async function insertRunIfAbsent(
   workflowId: string,
   response: FormResponse,
-  db: Pool = getDb(),
+  db: Pool | PoolClient = getDb(),
 ): Promise<boolean> {
   const result = await db.query(
     `INSERT INTO run (workflow_id, response_id, create_time, last_submitted_time, answers_json)

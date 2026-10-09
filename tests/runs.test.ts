@@ -54,3 +54,26 @@ test("response IDs are unique per workflow and queued runs survive a new connect
     await db.query("DELETE FROM workflow WHERE id = $1", [workflow.id]);
   }
 });
+
+test("run insertion participates in the caller's transaction", async () => {
+  const workflow = await saveWorkflow({ name: "Transaction test", formId: "form-transaction" }, db);
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    assert.equal(
+      await insertRunIfAbsent(workflow.id, {
+        responseId: "rolled-back-response",
+        createTime: "2026-10-08T10:00:00.000Z",
+        lastSubmittedTime: "2026-10-08T10:00:00.000Z",
+        answers: {},
+      }, client),
+      true,
+    );
+    await client.query("ROLLBACK");
+    assert.equal((await listRuns(db)).filter((run) => run.workflowId === workflow.id).length, 0);
+  } finally {
+    await client.query("ROLLBACK").catch(() => {});
+    client.release();
+    await db.query("DELETE FROM workflow WHERE id = $1", [workflow.id]);
+  }
+});

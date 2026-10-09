@@ -11,8 +11,8 @@
     "format:check": "prettier --check .",
     "db:migrate": "tsx scripts/db-migrate.ts",
     "test": "tsx --test tests/*.test.ts",
-    "worker:once": "tsx src/worker/index.ts --once",
-    "worker": "tsx src/worker/index.ts"
+    "worker:once": "node --env-file-if-exists=.env.local --import tsx src/worker/index.ts --once",
+    "worker": "node --env-file-if-exists=.env.local --import tsx src/worker/index.ts"
   },
   "dependencies": {
     "googleapis": "184.0.0",
