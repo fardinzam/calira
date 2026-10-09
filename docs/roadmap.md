@@ -1,6 +1,6 @@
 # Automator — MVP Roadmap
 
-**Status:** Planning; no application code has been written. This roadmap connects [Milestone 01](plans/01-milestone.md) to all nine acceptance criteria in [product.md](product.md). `product.md` is authoritative for MVP behavior; [architecture.md](architecture.md) is authoritative for technical design. Detailed execution plans are written and reviewed one milestone at a time. The MVP can be verified locally with one developer-controlled Google account; public deployment and multi-user app auth are outside this roadmap.
+**Status:** Milestone 01 complete; Milestone 02 planned. This roadmap connects [Milestone 01](plans/01-milestone.md) to all nine acceptance criteria in [product.md](product.md). `product.md` is authoritative for MVP behavior; [architecture.md](architecture.md) is authoritative for technical design. Detailed execution plans are written and reviewed one milestone at a time. The MVP can be verified locally with one developer-controlled Google account; public deployment and multi-user app auth are outside this roadmap.
 
 ## Sequence
 
@@ -37,7 +37,7 @@
 
 **Acceptance checks:** A valid reference workflow survives a restart and can be enabled; an incomplete or invalid configuration cannot be enabled; the Filter comparison and every required action input can be reviewed before enablement; changing a saved workflow does not silently alter an earlier run's captured configuration; enable/disable status is visible. This milestone prepares product criterion **1**; the live-action portion is confirmed later.
 
-**Decisions before its detailed plan:** Fix the reference Form question types and field mapping, requested-time format, provider time-zone selection, Calendar event end-time/duration rule, and how Milestone 01 `queued` runs are handled when full configuration is introduced. Decide whether a workflow already in progress finishes when the owner disables it; record the choice in the architecture and decision log before implementation.
+**Decisions for its detailed plan:** The reference Form question types and mapping, requested-time format, provider time zone, 60-minute event, legacy run treatment, and disable behavior are recorded in [the Milestone 02 plan](plans/02-milestone.md), [architecture](architecture.md), and [decision log](decisions.md).
 
 ### Milestone 03 — Working automation
 
@@ -85,7 +85,7 @@
 
 - **Previously reported doc conflicts are resolved in the current files:** Filter appears in the MVP but no longer in the post-MVP list of `product.md`. `architecture.md` now accepts `pg` and `googleapis`, matching Milestone 01. Do not reintroduce either discrepancy when writing later plans.
 - **Milestone 01 link repair is still needed when that file is next edited:** It moved to `docs/plans/`, but its `Sources` links still point to `./product.md`, `./architecture.md`, and `./decisions.md` rather than their parent directory. This roadmap does not modify that file.
-- **Before Milestone 02:** Resolve the reference Form schema, time zone and event duration, treatment of existing `queued` runs, and disable behavior for in-progress runs.
+- **Before Milestone 02:** Resolved in the Milestone 02 plan, architecture, and decision log: reference Form schema, time zone and event duration, treatment of existing `queued` runs, and disable behavior for in-progress runs.
 - **Before Milestone 03:** Resolve the exact Forms/Calendar scopes and minimal Gmail message construction; verify Google access with the developer-owned resources.
 - **Before Milestone 04:** Resolve bounded retry values and review paths for ambiguous Calendar and Gmail outcomes.
 
