@@ -61,7 +61,7 @@ test("setup rejects blank values and shows a safe save error", async () => {
   );
 });
 
-test("setup saves a workflow and home can enable and disable it", async () => {
+test("setup saves an incomplete workflow and home rejects enablement", async () => {
   const { createWorkflow, toggleWorkflow } = await actions;
   const { default: Home } = await homePage;
   const marker = `ui-${crypto.randomUUID()}`;
@@ -93,10 +93,10 @@ test("setup saves a workflow and home can enable and disable it", async () => {
           workflow.id,
         ])
       ).rows[0].enabled,
-      true,
+      false,
     );
     html = renderToStaticMarkup(await Home());
-    assert.match(html, /Enabled/);
+    assert.match(html, /Disabled/);
 
     toggle.set("enabled", "false");
     await assert.rejects(toggleWorkflow(toggle), /NEXT_REDIRECT/);

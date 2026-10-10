@@ -1,6 +1,6 @@
 # Milestone 02 — Complete workflow configuration
 
-**Status:** Planned; implementation has not started. This plan implements [Milestone 02 in the roadmap](../roadmap.md). [Product](../product.md) controls user-visible behavior; [architecture](../architecture.md) controls technical design; [decisions](../decisions.md) records the reference choices. Milestone 01 is complete. Milestone 03 owns Filter execution and Calendar/Gmail calls.
+**Status:** In progress; Task 1 code is ready for owner review. This plan implements [Milestone 02 in the roadmap](../roadmap.md). [Product](../product.md) controls user-visible behavior; [architecture](../architecture.md) controls technical design; [decisions](../decisions.md) records the reference choices. Milestone 01 is complete. Milestone 03 owns Filter execution and Calendar/Gmail calls.
 
 ## Reviewable result
 
@@ -51,7 +51,7 @@ The builder needs Forms question titles, IDs, types, and choice options. Fetch t
 
 ## Execution rules for this milestone
 
-The owner's latest instruction supersedes `AGENTS.md`'s per-code-edit manual review gate **for Milestone 02 only**. The main agent manages each task to completion, including separate review, findings, integration, and checks, without stopping for owner review between tasks. The owner reviews the **completed milestone** before Milestone 03 begins. Other `AGENTS.md` requirements remain: simple code, no silent interface decisions, owner Git identity, short lowercase plain-text commit messages, and no AI attribution. The main agent makes a **local commit after each task** once review findings are resolved and its checks pass; subagents take no Git actions. Do not push or merge as part of this plan; obtain the owner's direction at the milestone review. Preserve unrelated working-tree changes.
+The owner's latest instruction restores `AGENTS.md`'s manual-review gate for Milestone 02. After each task's code, separate review, findings resolution, and checks, the main agent stops and presents the concrete diff and evidence. Continue only after the owner's explicit instruction. The main agent then makes a **local commit for that reviewed task** before the next dependent task; subagents take no Git actions. The owner also reviews the completed milestone before Milestone 03 begins. Other `AGENTS.md` requirements remain: simple code, no silent interface decisions, owner Git identity, short lowercase plain-text commit messages, and no AI attribution. Do not push or merge as part of this plan without the owner's direction. Preserve unrelated working-tree changes.
 
 The main agent owns migrations, `WorkflowConfig`, validation, workflow/run persistence, polling snapshot integration, shared interfaces, final integration, and commits. Implementation subagents receive only the permitted files below and must report changed files, checks actually run, limitations, and blockers. A different reviewer examines each task against this plan, product, architecture, and tests; it makes no edits. The main agent assesses every concrete finding, fixes or delegates a bounded fix, reruns relevant checks, and commits only then. Do not run dependent tasks until their contracts and prior review gates are complete. Parallel work is allowed only where the file ownership and interfaces below do not overlap.
 
@@ -68,7 +68,7 @@ Before any commit, inspect the diff and verify the configured Git author/committ
 3. Extend workflow persistence to save a draft or complete config, load one for editing, list current status, and enable/disable. The shared API accepts **caller-supplied trusted question metadata** for a complete save or enablement; Task 1 tests this with fixtures and does not call Google. The enable transaction rechecks that the validated config is still current before setting `enabled` and resetting the cursor. Tasks 4–5 must supply metadata fetched server-side by Task 3, never browser-supplied metadata. Reject Form ID changes while enabled. Preserve Milestone 01 polling and deduplication contracts.
 4. Tests: migrate fresh and existing Milestone 01 schemas, rerun migration without data loss, preserve old runs, disable incomplete legacy workflows, reject invalid/incomplete enablement, enable a valid config, survive database reconnection, and reject an enabled Form-ID change. Use a disposable test database; never point a destructive test at the owner's acceptance database.
 
-**Review/commit gate:** a separate reviewer checks the actual migration path, validation/transaction races, unnecessary abstractions, and test evidence. Main agent resolves findings and commits the verified task. The exact exported types/functions are then frozen for the Forms and UI assignments.
+**Review/commit gate:** a separate reviewer checks the actual migration path, validation/transaction races, unnecessary abstractions, and test evidence. Main agent resolves findings, stops for owner review, and commits after explicit instruction. The exact exported types/functions are then frozen for the Forms and UI assignments.
 
 ### Task 2 — Main agent: immutable run snapshots
 
@@ -78,17 +78,17 @@ Before any commit, inspect the diff and verify the configured Git author/committ
 2. If workflow config changes while pages are being fetched, use the configuration protected by the final workflow row lock; if Form ID or baseline changed, discard that fetch as Milestone 01 already does. Do not retrofit or mutate previously inserted snapshots. Null snapshots stay null for legacy history.
 3. Tests: edit after run insertion leaves earlier snapshot unchanged; a later response captures the new config; changing the Form ID while disabled does not change the original Form ID in earlier snapshots; duplicate polling does not replace a snapshot; a failed later page or database insert leaves cursor and runs recoverable; migration-era legacy runs stay null. Do not introduce the action executor.
 
-**Review/commit gate:** a different reviewer checks snapshot timing and cursor atomicity against the architecture and existing polling tests. Main agent resolves findings, runs focused checks, and commits.
+**Review/commit gate:** a different reviewer checks snapshot timing and cursor atomicity against the architecture and existing polling tests. Main agent resolves findings, runs focused checks, stops for owner review, and commits after explicit instruction.
 
 ### Task 3 — Forms subagent: question metadata and OAuth scope
 
 **Depends on:** Task 1's reviewed question-type interface. May run alongside Task 2 because files do not overlap. **Permitted files:** `src/lib/google/form-metadata.ts`, `scripts/google-authorize.ts`, and `tests/form-metadata.test.ts` (plus a dedicated OAuth test file if needed). Do not edit migration, workflow/run persistence, polling, or UI files.
 
-**Goal/interface:** export `getFormQuestions(formId)` using the existing server-side Google auth. Return only question ID, title, supported type, required flag, and choice options for the six reference roles. Report unsupported types honestly; do not silently label them as text. Preserve response-list scope and request `forms.body.readonly` for metadata. Convert access/revocation failures into safe UI-facing errors.
+**Goal/interface:** export `getFormQuestions(formId)` using the existing server-side Google auth. Return only question ID, title, supported type, required flag, choice options, and the Date `includeYear`/`includeTime` and Time `duration` modes needed by the shared validator for the six reference roles. Map `includeYear` to the contract's `hasYear` field. Report unsupported types honestly; do not silently label them as text. Preserve response-list scope and request `forms.body.readonly` for metadata. Convert access/revocation failures into safe UI-facing errors.
 
 **Acceptance checks:** mocked Forms API tests cover question extraction, choices, missing/unsupported items, and safe errors; TypeScript/build pass. A live metadata smoke check uses the new owner-controlled Form after consent is refreshed, reporting question count/types only, never answers, credentials, or token contents. If consent or the new Form is not yet ready, report the exact blocker and leave the live check for Task 6.
 
-**Reporting/review/commit gate:** report files, commands/results, supported schema, and blockers. A separate reviewer checks scope minimization, server-only secret handling, and mapping fidelity. Main agent integrates any fixes and commits the task.
+**Reporting/review/commit gate:** report files, commands/results, supported schema, and blockers. A separate reviewer checks scope minimization, server-only secret handling, and mapping fidelity. Main agent integrates any fixes, stops for owner review, and commits after explicit instruction.
 
 ### Task 4 — UI subagent: builder, editing, and preview
 
@@ -98,7 +98,7 @@ Before any commit, inspect the diff and verify the configured Git author/committ
 
 **Acceptance checks:** UI/server-boundary tests cover valid creation/edit, incomplete draft, rejected invalid input, unsupported/missing question, placeholders, preview, and safe error states. Run `npm test`, typecheck, lint, and build, reporting actual results. Keep standard React/Next/Tailwind patterns; no general builder framework.
 
-**Reporting/review/commit gate:** report files, commands/results, screenshots or visible-flow notes, and limitations. A separate reviewer checks the full review-before-enable information and product wording. Main agent resolves findings, integrates, and commits.
+**Reporting/review/commit gate:** report files, commands/results, screenshots or visible-flow notes, and limitations. A separate reviewer checks the full review-before-enable information and product wording. Main agent resolves findings, integrates, stops for owner review, and commits after explicit instruction.
 
 ### Task 5 — UI subagent: status, landing page, and enable flow
 
@@ -108,7 +108,7 @@ Before any commit, inspect the diff and verify the configured Git author/committ
 
 **Acceptance checks:** tests cover no-workflow and save-error states, invalid enable rejection, visible enable/disable state after reload, edit link, and accurate milestone wording. Verify a complete workflow can be enabled and an incomplete legacy workflow cannot. Run focused tests, typecheck, lint, and build.
 
-**Reporting/review/commit gate:** report files and exact results. A separate reviewer checks that UI labels match the persisted behavior and no action is implied. Main agent resolves findings and commits.
+**Reporting/review/commit gate:** report files and exact results. A separate reviewer checks that UI labels match the persisted behavior and no action is implied. Main agent resolves findings, stops for owner review, and commits after explicit instruction.
 
 ### Task 6 — Main agent: integration and milestone acceptance
 
@@ -118,9 +118,18 @@ Before any commit, inspect the diff and verify the configured Git author/committ
 2. Use the new six-question owner-controlled Form. Refresh local OAuth consent for the metadata scope and verify that the API returns the expected question IDs/types without logging answers. Confirm the builder maps them and rejects a wrong type or missing `Consultation` choice.
 3. Save a full workflow with a chosen Calendar ID, sample-safe Gmail text, and the fixed zone/duration. Reload/restart the app and worker; confirm the config persists and enabling succeeds. Save an incomplete draft and confirm enable fails in the UI and server. Confirm enable/disable state and baseline behavior.
 4. Submit one new response while enabled, poll once, and inspect the stored run's config snapshot **without displaying answer values**. Edit the workflow; inspect the earlier run snapshot and current config to prove they differ only where edited. Submit a second new response and confirm its new snapshot. Recheck that repeated polling creates no duplicate run and that legacy runs remain detection-only. Calendar and Gmail APIs must not be called.
-5. Run `npm test` with `PGPASSWORD` only in the test process, `npx tsc --noEmit`, `npm run lint`, and `npm run build`. Perform a live browser pass through create/edit/preview/enable/disable and the home/run pages. Record commands, counts, observed states, and limitations below. Have a separate final reviewer check the integrated diff against this plan, product, architecture, and test evidence; resolve findings. Commit the final milestone-owned fixes/documentation locally.
+5. Run `npm test` with `PGPASSWORD` only in the test process, `npx tsc --noEmit`, `npm run lint`, and `npm run build`. Perform a live browser pass through create/edit/preview/enable/disable and the home/run pages. Record commands, counts, observed states, and limitations below. Have a separate final reviewer check the integrated diff against this plan, product, architecture, and test evidence; resolve findings. Stop for the owner's milestone review, then commit final milestone-owned fixes/documentation locally after explicit instruction.
 
-**Owner gate:** present the completed milestone diff and local commit list, exact verification evidence, any remaining issues, and the proposed Milestone 03 dependency. Stop for owner review. Do not start Milestone 03, push, or merge until the owner directs it.
+**Owner gate:** present the completed milestone diff and existing local commit list, exact verification evidence, any remaining issues, and the proposed Milestone 03 dependency. Stop for owner review. Do not start Milestone 03, push, or merge until the owner directs it.
+
+## Task progress
+
+- [ ] Task 1 — migration and shared configuration contract (code and separate review complete; owner review pending)
+- [ ] Task 2 — immutable run snapshots
+- [ ] Task 3 — Form metadata and OAuth scope
+- [ ] Task 4 — builder, editing, and preview
+- [ ] Task 5 — status, landing page, and enable flow
+- [ ] Task 6 — integration and milestone acceptance
 
 ## Acceptance checklist
 
@@ -131,8 +140,9 @@ Before any commit, inspect the diff and verify the configured Git author/committ
 - [ ] Enable/disable status and incomplete state are visible; disabled workflows are not polled, and the later executor's queued/running rule is recorded.
 - [ ] The landing page describes the consultation-request flow and accurately says actions begin in Milestone 03.
 - [ ] Focused tests, full test suite, typecheck, lint, build, migration checks, live Form metadata, and browser flow have recorded results. Any unrun check is marked pending rather than passed.
-- [ ] Each task has a separate reviewer, findings disposition, and one incremental local commit; owner review happens at the milestone boundary.
+- [ ] Each task has a separate reviewer, findings disposition, owner review, and one incremental local commit; the owner also reviews the milestone as a whole.
 
 ## Progress notes
 
 - 2026-10-09: Detailed plan written after the owner chose the new consultation Form, Los Angeles time zone, 60-minute event, legacy detection history, and disable behavior. The plan also records the reference question types and the migration rule for incomplete enabled workflows. A separate document reviewer found gaps in question types, source Form snapshots, migration policy, and stale roadmap status; these were addressed. No Milestone 02 code or live check has started. The new Form and refreshed metadata consent are execution prerequisites.
+- 2026-10-09: The owner restored the per-task manual-review gate after the planning commit; the execution rules above now reflect that instruction. Task 1 code is ready for owner review; it is not checked complete or committed. The main agent added the incremental migration, shared config/question metadata types and validator, draft/complete workflow persistence, and locked enable validation. It updated existing poll/UI tests for the new enable rule. Migration tests passed on an empty disposable schema and a populated Milestone 01 schema, including repeat migration and retained cursor, run identity, answers, and timestamps. `npm test` passed 39/39 against `automator_m01_test` with `PGPASSWORD` only in the test process; `npx tsc --noEmit`, `npm run lint`, `npm run build`, focused Prettier, and `git diff --check` passed. A separate reviewer found that Date+time and duration question modes were accepted and complete-looking saves could bypass metadata; both were fixed with failing-first tests. Its scoped re-review found no remaining blocking defect and independently passed the five config tests. No live Form check was run. The current UI cannot enable a workflow until Tasks 4–5 wire live metadata. No Git action was taken for Task 1.

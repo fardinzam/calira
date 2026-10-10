@@ -4,6 +4,7 @@ import { Pool } from "pg";
 import type { FormResponse } from "../src/lib/runs";
 import { saveWorkflow, setWorkflowEnabled } from "../src/lib/workflows";
 import { pollEnabledWorkflows, pollWorkflow } from "../src/worker/poll-forms";
+import { config, metadataFor } from "./workflow-fixtures";
 
 const connectionString = process.env.TEST_DATABASE_URL;
 if (!connectionString) throw new Error("Missing TEST_DATABASE_URL");
@@ -29,11 +30,20 @@ async function withWorkflow(
   enabled = true,
 ) {
   const workflow = await saveWorkflow(
-    { name: "Polling test", formId: "form-test" },
+    { name: "Polling test", formId: "form-test", config },
     db,
+    metadataFor("form-test"),
   );
   try {
-    if (enabled) await setWorkflowEnabled(workflow.id, true, baseline, db);
+    if (enabled) {
+      await setWorkflowEnabled(
+        workflow.id,
+        true,
+        baseline,
+        db,
+        metadataFor("form-test"),
+      );
+    }
     await body(workflow.id);
   } finally {
     await db.query("DELETE FROM workflow WHERE id = $1", [workflow.id]);
@@ -225,7 +235,13 @@ test("disable and re-enable during fetch discard the old baseline", async () => 
     );
     await fetching;
     await setWorkflowEnabled(id, false, new Date(at(2)), db);
-    await setWorkflowEnabled(id, true, new Date(at(3)), db);
+    await setWorkflowEnabled(
+      id,
+      true,
+      new Date(at(3)),
+      db,
+      metadataFor("form-test"),
+    );
     releaseFetch();
     await polling;
     assert.deepEqual(await state(id), {
@@ -275,16 +291,30 @@ test("a concurrent poll skips a workflow already being fetched", async () => {
 
 test("a failed workflow does not prevent the next enabled workflow from polling", async () => {
   const failing = await saveWorkflow(
-    { name: "Failing poll", formId: "form-failing-cycle" },
+    { name: "Failing poll", formId: "form-failing-cycle", config },
     db,
+    metadataFor("form-failing-cycle"),
   );
   const succeeding = await saveWorkflow(
-    { name: "Succeeding poll", formId: "form-succeeding-cycle" },
+    { name: "Succeeding poll", formId: "form-succeeding-cycle", config },
     db,
+    metadataFor("form-succeeding-cycle"),
   );
   try {
-    await setWorkflowEnabled(failing.id, true, baseline, db);
-    await setWorkflowEnabled(succeeding.id, true, baseline, db);
+    await setWorkflowEnabled(
+      failing.id,
+      true,
+      baseline,
+      db,
+      metadataFor("form-failing-cycle"),
+    );
+    await setWorkflowEnabled(
+      succeeding.id,
+      true,
+      baseline,
+      db,
+      metadataFor("form-succeeding-cycle"),
+    );
     await db.query("UPDATE workflow SET created_at = $2 WHERE id = $1", [
       failing.id,
       at(2),
