@@ -158,9 +158,9 @@ Only the main agent changes these types after review. A client marks `rejected` 
 
 **Depends on:** Task 1 reviewed action types and OAuth choice. **Exact permitted files:** `src/lib/google/calendar.ts` and `tests/calendar.test.ts` only. **Interface:** export `calendarClient: CalendarClient` accepting `CalendarEventInput` from `src/lib/run-execution.ts`; its `insertEvent` calls `google.calendar({version:"v3", auth: await getGoogleAuth()}).events.insert` once and returns `ActionResult<{eventId:string}>`. No persistence, workflow decisions, retries, or other file edits.
 
-- [ ] Write mocked API tests for the configured Calendar ID, supplied stable event ID, fixed title/notes, offset start/end and zone, no attendees, returned ID, definite HTTP 400/403, transport/5xx unknown, and missing or mismatched response ID.
-- [ ] Implement the smallest adapter and safe error mapping. Never log the event body or raw API response.
-- [ ] Run focused tests, typecheck, lint, and scoped formatting.
+- [x] Write mocked API tests for the configured Calendar ID, supplied stable event ID, fixed title/notes, offset start/end and zone, no attendees, returned ID, definite HTTP 400/403, transport/5xx unknown, and missing or mismatched response ID.
+- [x] Implement the smallest adapter and safe error mapping. Never log the event body or raw API response.
+- [x] Run focused tests, typecheck, lint, and scoped formatting.
 
 **Reporting:** changed files, exact commands/results, safe API request fields tested, blockers, and limitations. **Review/commit gate:** separate read-only critic checks adapter scope and tests against this plan/product/architecture; subagent fixes concrete findings within its files and receives scoped re-review. Main agent integrates and alone stages/locally commits under the approved plan.
 
@@ -213,7 +213,7 @@ Only the main agent changes these types after review. A client marks `rejected` 
 - [x] Task 1 — migration, contract, and OAuth scopes; critic approved; committed locally
 - [x] Task 2 — claims, transitions, and safe detail read; critic approved; committed locally
 - [ ] Task 3 — Filter and pre-action validation; critic approved; local commit or owner review:
-- [ ] Task 4 — Calendar adapter; critic approved; local commit or owner review:
+- [x] Task 4 — Calendar adapter; critic approved; committed locally
 - [ ] Task 5 — Gmail adapter; critic approved; local commit or owner review:
 - [ ] Task 6 — run-detail UI; critic approved; local commit or owner review:
 - [ ] Task 7 — worker orchestration; critic approved; local commit or owner review:
@@ -234,6 +234,7 @@ Only the main agent changes these types after review. A client marks `rejected` 
 | ------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | Task 1 critic | Sender accepted group/comment/control syntax                                                              | Failing-first cases added; stricter mailbox reader; scoped re-review approved, 2026-10-10  |
 | Task 2 critic | Missing disable/claim race and intermediate boundary assertions; legacy detail could show artificial rows | Added lock race/boundary checks; legacy rows hidden; scoped re-review approved, 2026-10-10 |
+| Task 4 critic | Google client could retry an insert despite one adapter call                                              | Disabled SDK retry and added option assertion; scoped re-review approved, 2026-10-10       |
 
 ## Final owner review gate
 
