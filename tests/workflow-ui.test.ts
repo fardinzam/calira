@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { after, test } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Pool } from "pg";
+import { google, forms_v1 } from "googleapis";
 import { insertRunIfAbsent } from "../src/lib/runs";
 import { saveWorkflow } from "../src/lib/workflows";
 import { config, metadataFor, questions } from "./workflow-fixtures";
@@ -20,6 +25,116 @@ const runsPage = import("../src/app/runs/page");
 const runList = import("../src/app/runs/run-list");
 const builderSave = import("../src/app/workflows/builder-save");
 const builderPreview = import("../src/app/workflows/workflow-preview");
+
+async function withFormApi(
+  formId: string,
+  requestTypeOptions: string[],
+  run: () => Promise<void>,
+  onRead?: () => void,
+) {
+  const directory = await mkdtemp(join(tmpdir(), "automator-ui-"));
+  const tokenFile = join(directory, "token.json");
+  await writeFile(tokenFile, JSON.stringify({ refresh_token: "test-token" }), {
+    mode: 0o600,
+  });
+  const savedEnv = { ...process.env };
+  const originalForms = google.forms;
+  try {
+    process.env.GOOGLE_CLIENT_ID = "test-client";
+    process.env.GOOGLE_CLIENT_SECRET = "test-secret";
+    process.env.GOOGLE_TOKEN_FILE = tokenFile;
+    google.forms = (() => ({
+      forms: {
+        get: async ({ formId: requestedId }: { formId: string }) => {
+          onRead?.();
+          assert.equal(requestedId, formId);
+          return {
+            data: {
+              formId,
+              items: [
+                {
+                  title: "Name",
+                  questionItem: {
+                    question: {
+                      questionId: "name",
+                      required: true,
+                      textQuestion: {},
+                    },
+                  },
+                },
+                {
+                  title: "Email",
+                  questionItem: {
+                    question: {
+                      questionId: "email",
+                      required: true,
+                      textQuestion: {},
+                    },
+                  },
+                },
+                {
+                  title: "Request type",
+                  questionItem: {
+                    question: {
+                      questionId: "request",
+                      required: true,
+                      choiceQuestion: {
+                        type: "RADIO",
+                        options: requestTypeOptions.map((value) => ({ value })),
+                      },
+                    },
+                  },
+                },
+                {
+                  title: "Date",
+                  questionItem: {
+                    question: {
+                      questionId: "date",
+                      required: true,
+                      dateQuestion: { includeYear: true, includeTime: false },
+                    },
+                  },
+                },
+                {
+                  title: "Time",
+                  questionItem: {
+                    question: {
+                      questionId: "time",
+                      required: true,
+                      timeQuestion: { duration: false },
+                    },
+                  },
+                },
+                {
+                  title: "Notes",
+                  questionItem: {
+                    question: {
+                      questionId: "notes",
+                      required: false,
+                      textQuestion: { paragraph: true },
+                    },
+                  },
+                },
+              ],
+            } satisfies forms_v1.Schema$Form,
+          };
+        },
+      },
+    })) as unknown as typeof google.forms;
+    await run();
+  } finally {
+    google.forms = originalForms;
+    process.env = savedEnv;
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+function toggleData(id: string, enabled: boolean) {
+  const data = new FormData();
+  data.set("id", id);
+  data.set("enabled", String(enabled));
+  return data;
+}
 
 test("setup rejects blank values and shows a safe save error", async () => {
   const { createWorkflow } = await actions;
@@ -370,4 +485,176 @@ test("metadata and save actions return safe errors for blank setup", async () =>
     body: "",
   });
   assert.deepEqual(result, { error: "Workflow name is required" });
+});
+
+test("home explains the consultation flow and milestone limits", async () => {
+  const { default: Home } = await homePage;
+  const html = renderToStaticMarkup(
+    await Home({ searchParams: Promise.resolve({ error: "configuration" }) }),
+  );
+  assert.match(html, /consultation request/i);
+  assert.match(html, /Google Forms/);
+  assert.match(html, /Filter/);
+  assert.match(html, /Google Calendar/);
+  assert.match(html, /Gmail/);
+  assert.match(html, /Milestone 03/);
+  assert.match(html, /href="\/workflows\/new"/);
+  assert.match(html, /href="\/runs"/);
+  assert.match(html, /Review the workflow configuration/);
+  assert.match(
+    html,
+    /Milestone 01 runs without a configuration snapshot remain detection history/,
+  );
+  assert.doesNotMatch(html, /Earlier queued runs remain detection history/);
+  assert.doesNotMatch(html, /action-ready|appointment confirmed/i);
+});
+
+test("home shows an empty state in an isolated schema without touching existing workflows", async () => {
+  const schema = `ui_empty_${crypto.randomUUID().replaceAll("-", "")}`;
+  await db.query(`CREATE SCHEMA "${schema}"`);
+  const isolatedUrl = new URL(connectionString);
+  isolatedUrl.searchParams.set("options", `-c search_path=${schema}`);
+  const env = { ...process.env, DATABASE_URL: isolatedUrl.toString() };
+  try {
+    execFileSync(
+      process.execPath,
+      ["--import", "tsx", "scripts/db-migrate.ts"],
+      {
+        env,
+        encoding: "utf8",
+      },
+    );
+    const html = execFileSync(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        "--input-type=module",
+        "-e",
+        'import { renderToStaticMarkup } from "react-dom/server"; import * as page from "./src/app/page.tsx"; const Home = page.default.default; process.stdout.write(renderToStaticMarkup(await Home()));',
+      ],
+      { env, encoding: "utf8" },
+    );
+    assert.match(html, /No workflows saved yet/);
+    assert.match(html, /No responses detected yet/);
+    assert.match(html, /href="\/workflows\/new"/);
+  } finally {
+    await db.query(`DROP SCHEMA "${schema}" CASCADE`);
+  }
+});
+
+test("home shows incomplete legacy workflow and rejects enable without Google access", async () => {
+  const { default: Home } = await homePage;
+  const { toggleWorkflow } = await actions;
+  const saved = await saveWorkflow(
+    { name: "Legacy draft", formId: `ui-${crypto.randomUUID()}` },
+    db,
+  );
+  try {
+    const before = renderToStaticMarkup(await Home());
+    assert.match(before, new RegExp(`href="/workflows/${saved.id}"`));
+    assert.match(before, /Configuration: Incomplete/);
+    assert.match(before, /Polling: Disabled/);
+    await assert.rejects(
+      toggleWorkflow(toggleData(saved.id, true)),
+      (error: unknown) =>
+        error instanceof Error &&
+        "digest" in error &&
+        String(error.digest).includes("/?error=incomplete"),
+    );
+    assert.equal(
+      (await db.query("SELECT enabled FROM workflow WHERE id = $1", [saved.id]))
+        .rows[0].enabled,
+      false,
+    );
+  } finally {
+    await db.query("DELETE FROM workflow WHERE id = $1", [saved.id]);
+  }
+});
+
+test("home and edit page show a complete workflow enabled and disabled after reload", async () => {
+  const { default: Home } = await homePage;
+  const { default: EditWorkflow } = await editWorkflowPage;
+  const { toggleWorkflow } = await actions;
+  const formId = `ui-${crypto.randomUUID()}`;
+  const saved = await saveWorkflow(
+    { name: "Consultations", formId, config },
+    db,
+    metadataFor(formId),
+  );
+  try {
+    let metadataReads = 0;
+    await withFormApi(
+      formId,
+      ["Consultation", "Other"],
+      async () => {
+        await assert.rejects(
+          toggleWorkflow(toggleData(saved.id, true)),
+          /NEXT_REDIRECT/,
+        );
+        assert.equal(metadataReads, 1);
+        assert.equal(
+          (
+            await db.query("SELECT enabled FROM workflow WHERE id = $1", [
+              saved.id,
+            ])
+          ).rows[0].enabled,
+          true,
+        );
+        const enabledHome = renderToStaticMarkup(await Home());
+        assert.match(enabledHome, /Configuration: Complete/);
+        assert.match(enabledHome, /Polling: Enabled/);
+        assert.match(enabledHome, new RegExp(`href="/workflows/${saved.id}"`));
+        const edit = renderToStaticMarkup(
+          await EditWorkflow({ params: Promise.resolve({ id: saved.id }) }),
+        );
+        assert.match(edit, /Status: Enabled/);
+        assert.match(edit, /Milestone 03/);
+        await assert.rejects(
+          toggleWorkflow(toggleData(saved.id, false)),
+          /NEXT_REDIRECT/,
+        );
+        assert.equal(metadataReads, 1);
+      },
+      () => {
+        metadataReads++;
+      },
+    );
+    assert.equal(
+      (await db.query("SELECT enabled FROM workflow WHERE id = $1", [saved.id]))
+        .rows[0].enabled,
+      false,
+    );
+    assert.match(renderToStaticMarkup(await Home()), /Polling: Disabled/);
+  } finally {
+    await db.query("DELETE FROM workflow WHERE id = $1", [saved.id]);
+  }
+});
+
+test("enable rejects a Form whose current choices no longer match the saved config", async () => {
+  const { toggleWorkflow } = await actions;
+  const formId = `ui-${crypto.randomUUID()}`;
+  const saved = await saveWorkflow(
+    { name: "Consultations", formId, config },
+    db,
+    metadataFor(formId),
+  );
+  try {
+    await withFormApi(formId, ["Other"], async () => {
+      await assert.rejects(
+        toggleWorkflow(toggleData(saved.id, true)),
+        (error: unknown) =>
+          error instanceof Error &&
+          "digest" in error &&
+          String(error.digest).includes("/?error=configuration"),
+      );
+    });
+    assert.equal(
+      (await db.query("SELECT enabled FROM workflow WHERE id = $1", [saved.id]))
+        .rows[0].enabled,
+      false,
+    );
+  } finally {
+    await db.query("DELETE FROM workflow WHERE id = $1", [saved.id]);
+  }
 });

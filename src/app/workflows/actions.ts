@@ -1,8 +1,9 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { saveWorkflow, setWorkflowEnabled } from "@/lib/workflows";
+import { getWorkflow, saveWorkflow, setWorkflowEnabled } from "@/lib/workflows";
 import { getFormQuestions } from "@/lib/google/form-metadata";
+import { hasCompleteWorkflowFields } from "@/lib/workflow-config";
 import { saveBuilderWorkflow } from "./builder-save";
 
 export type SubmittedBuilderInput = {
@@ -120,10 +121,34 @@ export async function toggleWorkflow(formData: FormData): Promise<void> {
   ) {
     redirect("/?error=update");
   }
+  let errorCode = "";
   try {
-    await setWorkflowEnabled(id, enabled === "true", new Date());
-  } catch {
-    redirect("/?error=update");
+    if (enabled === "true") {
+      const workflow = await getWorkflow(id);
+      if (!workflow) throw new Error("Workflow not found");
+      if (!hasCompleteWorkflowFields(workflow.config)) {
+        throw new Error("Workflow configuration is incomplete");
+      }
+      const metadata = await getFormQuestions(workflow.formId);
+      await setWorkflowEnabled(id, true, new Date(), undefined, metadata);
+    } else {
+      await setWorkflowEnabled(id, false, new Date());
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    errorCode =
+      message === "Workflow configuration is incomplete"
+        ? "incomplete"
+        : /Form questions|Google authorization|GOOGLE_TOKEN_FILE|Missing GOOGLE/.test(
+              message,
+            )
+          ? "form"
+          : /question|Consultation|Calendar ID|Gmail|placeholder|Form metadata|Filter/.test(
+                message,
+              )
+            ? "configuration"
+            : "update";
   }
+  if (errorCode) redirect(`/?error=${errorCode}`);
   redirect("/");
 }

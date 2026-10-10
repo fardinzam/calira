@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getWorkflow } from "@/lib/workflows";
+import { hasCompleteWorkflowFields } from "@/lib/workflow-config";
 import WorkflowBuilder from "../workflow-builder";
+import { toggleWorkflow } from "../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +28,10 @@ export default async function EditWorkflow({
       <p className="mt-2 text-sm text-gray-700">
         Status: {workflow.enabled ? "Enabled" : "Disabled"}
       </p>
+      <p className="mt-1 text-sm text-gray-700">
+        Configuration:{" "}
+        {hasCompleteWorkflowFields(workflow.config) ? "Complete" : "Incomplete"}
+      </p>
       {saved && ["draft", "complete"].includes(saved) && (
         <p
           role="status"
@@ -43,6 +49,30 @@ export default async function EditWorkflow({
           enabled: workflow.enabled,
         }}
       />
+      <form
+        action={toggleWorkflow}
+        className="mt-8 border-t border-gray-300 pt-5"
+      >
+        <input type="hidden" name="id" value={workflow.id} />
+        <input
+          type="hidden"
+          name="enabled"
+          value={workflow.enabled ? "false" : "true"}
+        />
+        <button
+          type="submit"
+          disabled={
+            !workflow.enabled && !hasCompleteWorkflowFields(workflow.config)
+          }
+          className="rounded border border-gray-500 px-4 py-2 text-sm disabled:opacity-50"
+        >
+          {workflow.enabled ? "Disable polling" : "Enable polling"}
+        </button>
+        <p className="mt-2 text-sm text-gray-700">
+          Polling records detected responses. Calendar and Gmail execution
+          arrives in Milestone 03.
+        </p>
+      </form>
     </main>
   );
 }
