@@ -168,9 +168,9 @@ Only the main agent changes these types after review. A client marks `rejected` 
 
 **Depends on:** Task 1 reviewed action types, installed MailComposer dependency, and OAuth choice. **Exact permitted files:** `src/lib/google/gmail.ts` and `tests/gmail.test.ts` only. **Interface:** export `gmailClient: GmailClient`; its `sendMessage` accepts validated `GmailMessageInput`, returns `ActionResult<{messageId:string}>`, and calls `users.messages.send` once with `userId:"me"` and base64url `raw`. No persistence, retry logic, workflow or package edits.
 
-- [ ] Write mocked tests that decode the outgoing raw message without printing it: one From, one To, subject, UTF-8 plain-text body, no HTML/attachment/extra recipient, Gmail response ID, definite HTTP 400/403, transport/5xx unknown, and missing ID. Include CR/LF header-input rejection as defense in depth.
-- [ ] Build with MailComposer `from`/`to`/`subject`/`text` only, disabled file/URL access, and no SMTP transport. Keep all raw MIME and tokens off logs and UI.
-- [ ] Run focused tests, typecheck, lint, and scoped formatting.
+- [x] Write mocked tests that decode the outgoing raw message without printing it: one From, one To, subject, UTF-8 plain-text body, no HTML/attachment/extra recipient, Gmail response ID, definite HTTP 400/403, transport/5xx unknown, and missing ID. Include CR/LF header-input rejection as defense in depth.
+- [x] Build with MailComposer `from`/`to`/`subject`/`text` only, disabled file/URL access, and no SMTP transport. Keep all raw MIME and tokens off logs and UI.
+- [x] Run focused tests, typecheck, lint, and scoped formatting.
 
 **Reporting:** changed files, exact checks/results, safe message properties, blockers, and limitations. **Review/commit gate:** separate read-only critic checks Gmail scope, single-recipient plain-text construction, safe errors, and tests; subagent fixes within its files and gets scoped re-review. Main agent integrates and alone stages/locally commits under the approved plan.
 
@@ -214,7 +214,7 @@ Only the main agent changes these types after review. A client marks `rejected` 
 - [x] Task 2 — claims, transitions, and safe detail read; critic approved; committed locally
 - [ ] Task 3 — Filter and pre-action validation; critic approved; local commit or owner review:
 - [x] Task 4 — Calendar adapter; critic approved; committed locally
-- [ ] Task 5 — Gmail adapter; critic approved; local commit or owner review:
+- [x] Task 5 — Gmail adapter; critic approved; committed locally
 - [ ] Task 6 — run-detail UI; critic approved; local commit or owner review:
 - [ ] Task 7 — worker orchestration; critic approved; local commit or owner review:
 - [ ] Task 8 — integration/live acceptance; final critic approved; local commit or owner review:
@@ -235,6 +235,7 @@ Only the main agent changes these types after review. A client marks `rejected` 
 | Task 1 critic | Sender accepted group/comment/control syntax                                                              | Failing-first cases added; stricter mailbox reader; scoped re-review approved, 2026-10-10  |
 | Task 2 critic | Missing disable/claim race and intermediate boundary assertions; legacy detail could show artificial rows | Added lock race/boundary checks; legacy rows hidden; scoped re-review approved, 2026-10-10 |
 | Task 4 critic | Google client could retry an insert despite one adapter call                                              | Disabled SDK retry and added option assertion; scoped re-review approved, 2026-10-10       |
+| Task 5 critic | No blocker; Task 3 must validate recipient syntax strictly before Calendar                                | Task 3 mapping rejects malformed recipient syntax; Task 3 review pending, 2026-10-10       |
 
 ## Final owner review gate
 
