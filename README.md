@@ -4,11 +4,11 @@ Automator is a focused workflow automation project for a solo service provider. 
 
 ## Current status
 
-Milestone 01 is in progress. The Next.js scaffold and database schema are present. Workflow setup, Forms polling, and run visibility are not implemented yet. Calendar and Gmail execution come in later milestones.
+Milestones 01 and 02 are complete. Milestone 03 implements the fixed consultation workflow, including Forms polling, Filter, Calendar, Gmail, and run detail; live acceptance passed and owner review is pending. Milestone 04 will add recovery and safe retry behavior.
 
 ## Run locally
 
-Run `npm install` and `npm run dev` to view the scaffold. To migrate an empty PostgreSQL database, provide `DATABASE_URL` to the command, for example `DATABASE_URL='postgresql://postgres@localhost:5432/automator_m01_test' npm run db:migrate` (with your local PostgreSQL authentication configured). The migration script does not load `.env.local`. `npm test` checks the worker's missing-secret error. The worker is a placeholder until Milestone 01 Task 4; it cannot poll Forms yet.
+Run `npm install`, configure the local values shown in `.env.example`, and run `npm run db:migrate` with `DATABASE_URL` set. Start the app with `npm run dev`; use `npm run worker:once` to poll Forms and process eligible queued runs once, or `npm run worker` for the 60-second loop. The migration script does not load `.env.local` itself. Tests use a separate `TEST_DATABASE_URL` and local PostgreSQL authentication.
 
 ## Project docs
 
@@ -17,4 +17,6 @@ Run `npm install` and `npm run dev` to view the scaffold. To migrate an empty Po
 - [Decision log](docs/decisions.md) — dated choices and what they replaced.
 - [MVP roadmap](docs/roadmap.md) — milestone sequence and acceptance-criterion coverage.
 - [Milestone 01 plan](docs/plans/01-milestone.md) — tasks, ownership, progress, and acceptance tests.
+- [Milestone 02 plan](docs/plans/02-milestone.md) — workflow configuration and Forms mapping.
+- [Milestone 03 plan](docs/plans/03-milestone.md) — working automation and live acceptance.
 - [Interview evidence log](docs/interview-notes.md) — incidents and decisions to record during the build, not prepared answers.

@@ -1,6 +1,6 @@
 # Automator — MVP Roadmap
 
-**Status:** Milestone 01 complete; Milestone 02 planned. This roadmap connects [Milestone 01](plans/01-milestone.md) to all nine acceptance criteria in [product.md](product.md). `product.md` is authoritative for MVP behavior; [architecture.md](architecture.md) is authoritative for technical design. Detailed execution plans are written and reviewed one milestone at a time. The MVP can be verified locally with one developer-controlled Google account; public deployment and multi-user app auth are outside this roadmap.
+**Status:** Milestones 01 and 02 complete; Milestone 03 live acceptance passed and owner review is pending; Milestone 04 planned. This roadmap connects [Milestone 01](plans/01-milestone.md) to all nine acceptance criteria in [product.md](product.md). `product.md` is authoritative for MVP behavior; [architecture.md](architecture.md) is authoritative for technical design. Detailed execution plans are written and reviewed one milestone at a time. The MVP can be verified locally with one developer-controlled Google account; public deployment and multi-user app auth are outside this roadmap.
 
 ## Sequence
 
