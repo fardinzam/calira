@@ -2,7 +2,7 @@
 
 > **For agentic workers:** Execute this plan task by task. The main agent owns the shared contracts, migrations, claiming, transactions, failure semantics, integration, and Git actions. Delegate only the bounded Calendar, Gmail, and run-detail UI tasks after their shared interfaces have passed main-agent and separate read-only review. Keep every checklist and evidence entry truthful.
 
-**Git gate and instruction conflict:** This planning draft is outside an approved Milestone 03 implementation plan: do not stage, commit, or push it. The owner's pasted `AGENTS.md` instructions say to stop after each code edit and never automatically stage or commit; the current on-disk `AGENTS.md` permits reviewed incremental local commits under an approved plan. The owner must resolve which rule governs Milestone 03 at plan approval. Until then, use the stricter manual-review/no-Git rule. Every “local commit” gate below is conditional on the owner choosing the current on-disk rule; otherwise stop for manual review after each edit and take Git actions only on explicit instruction. In either case, subagents never take Git actions, only the owner's configured Git identity may be used, and pushing or merging needs explicit direction.
+**Git gate:** The owner approved this plan on 2026-10-10 and explicitly authorized reviewed incremental **local** commits without per-task owner review, resolving the earlier instruction conflict. Only the main agent may stage and commit after its own review, separate read-only critic approval, resolution of findings, required checks, and verification of the owner's configured Git identity. Subagents never take Git actions. Do not push or merge without explicit direction. Stop for the owner's final milestone review.
 
 **Goal:** A new qualifying consultation response passes the saved equality Filter, creates one mapped Calendar event, sends one plain-text Gmail acknowledgement, and displays persisted step results. A nonqualifying response is recorded as filtered out without either action.
 
@@ -122,11 +122,11 @@ Only the main agent changes these types after review. A client marks `rejected` 
 
 **Depends on:** owner approval of this plan. **Owned files:** `db/003_run_execution.sql`, `scripts/db-migrate.ts`, `scripts/google-authorize.ts`, `src/lib/run-execution.ts` (types/contracts only at this stage), `src/lib/google/auth.ts`, `.env.example`, `package.json`, `package-lock.json`, `tests/migration.test.ts`, and a focused authorization/config test. No subagent edits them.
 
-- [ ] Write failing migration tests for a fresh schema and a populated Milestone 02 schema with queued and legacy null-snapshot runs; assert columns, fixed step constraints, preserved data, and harmless repeat migration.
-- [ ] Add `003_run_execution.sql` and runner version entry; run the focused migration tests until green.
-- [ ] Define the action/read types above; add only the shared error/result helpers needed by both Google clients. Install `@js-temporal/polyfill`, `nodemailer`, and its TypeScript types for the specified time/MIME handling; keep the lockfile current.
-- [ ] Extend the existing scope list with `calendar.events.owned` and `gmail.send` while retaining both Forms scopes. Add `GOOGLE_SENDER_EMAIL` to `.env.example` and a server-side validated reader that names the missing setting without printing its value. Test scope preservation and missing/invalid sender errors.
-- [ ] Run focused tests, `npx tsc --noEmit`, `npm run lint`, and `npm run build`. Review the exact exported types and schema against product/architecture before any delegation.
+- [x] Write failing migration tests for a fresh schema and a populated Milestone 02 schema with queued and legacy null-snapshot runs; assert columns, fixed step constraints, preserved data, and harmless repeat migration.
+- [x] Add `003_run_execution.sql` and runner version entry; run the focused migration tests until green.
+- [x] Define the action/read types above; add only the shared error/result helpers needed by both Google clients. Install `@js-temporal/polyfill`, `nodemailer`, and its TypeScript types for the specified time/MIME handling; keep the lockfile current.
+- [x] Extend the existing scope list with `calendar.events.owned` and `gmail.send` while retaining both Forms scopes. Add `GOOGLE_SENDER_EMAIL` to `.env.example` and a server-side validated reader that names the missing setting without printing its value. Test scope preservation and missing/invalid sender errors.
+- [x] Run focused tests, `npx tsc --noEmit`, `npm run lint`, and `npm run build`. Review the exact exported types and schema against product/architecture before any delegation.
 
 **Acceptance:** Old runs and poll history survive; new tables/states are usable; migration reruns safely; scopes are the four specified values; missing sender fails safely. **Review/commit gate:** a separate read-only critic checks schema upgrade, contract fit, scopes, and tests. Main agent resolves concrete findings, gets scoped re-review, approves, then alone may stage and locally commit only Task 1 files under the approved plan.
 
@@ -210,7 +210,7 @@ Only the main agent changes these types after review. A client marks `rejected` 
 
 ## Progress and evidence
 
-- [ ] Task 1 — migration, contract, and OAuth scopes; critic approved; local commit or owner review:
+- [x] Task 1 — migration, contract, and OAuth scopes; critic approved; committed locally
 - [ ] Task 2 — claims, transitions, and safe detail read; critic approved; local commit or owner review:
 - [ ] Task 3 — Filter and pre-action validation; critic approved; local commit or owner review:
 - [ ] Task 4 — Calendar adapter; critic approved; local commit or owner review:
@@ -219,20 +219,20 @@ Only the main agent changes these types after review. A client marks `rejected` 
 - [ ] Task 7 — worker orchestration; critic approved; local commit or owner review:
 - [ ] Task 8 — integration/live acceptance; final critic approved; local commit or owner review:
 
-| Check                                      | Actual command or observation | Result/date | Remaining issue |
-| ------------------------------------------ | ----------------------------- | ----------- | --------------- |
-| Fresh and upgraded migration, repeat       |                               | Pending     |                 |
-| Focused and full tests                     |                               | Pending     |                 |
-| Typecheck, lint, build, format, diff check |                               | Pending     |                 |
-| Consent and owner-controlled resources     |                               | Pending     |                 |
-| Qualifying live run and IDs                |                               | Pending     |                 |
-| Filtered live run, no action               |                               | Pending     |                 |
-| Re-poll duplicate check                    |                               | Pending     |                 |
-| Browser run detail and owner inbox check   |                               | Pending     |                 |
+| Check                                      | Actual command or observation | Result/date              | Remaining issue |
+| ------------------------------------------ | ----------------------------- | ------------------------ | --------------- |
+| Fresh and upgraded migration, repeat       | Task 1 migration tests        | 3/3 passed, 2026-10-10   |                 |
+| Focused and full tests                     | Task 1 `npm test`             | 65/65 passed, 2026-10-10 |                 |
+| Typecheck, lint, build, format, diff check | Task 1 named checks           | Passed, 2026-10-10       |                 |
+| Consent and owner-controlled resources     |                               | Pending                  |                 |
+| Qualifying live run and IDs                |                               | Pending                  |                 |
+| Filtered live run, no action               |                               | Pending                  |                 |
+| Re-poll duplicate check                    |                               | Pending                  |                 |
+| Browser run detail and owner inbox check   |                               | Pending                  |                 |
 
-| Task/reviewer | Concrete finding | Resolution and scoped re-review |
-| ------------- | ---------------- | ------------------------------- |
-| Pending       |                  |                                 |
+| Task/reviewer | Concrete finding                             | Resolution and scoped re-review                                                           |
+| ------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Task 1 critic | Sender accepted group/comment/control syntax | Failing-first cases added; stricter mailbox reader; scoped re-review approved, 2026-10-10 |
 
 ## Final owner review gate
 

@@ -39,7 +39,11 @@ async function main() {
       versions.add("001_init");
     }
 
-    for (const version of ["001_init", "002_workflow_config"]) {
+    for (const version of [
+      "001_init",
+      "002_workflow_config",
+      "003_run_execution",
+    ]) {
       if (versions.has(version)) continue;
       const path = `db/${version}.sql`;
       const sql = await readFile(resolve(path), "utf8");

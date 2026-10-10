@@ -41,7 +41,7 @@ test("migrates an empty schema and reruns without replaying migrations", async (
     );
     assert.deepEqual(
       first.rows.map((row) => row.version),
-      ["001_init", "002_workflow_config"],
+      ["001_init", "002_workflow_config", "003_run_execution"],
     );
     const columns = await db.query<{ column_name: string }>(
       "SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'run'",
@@ -49,9 +49,112 @@ test("migrates an empty schema and reruns without replaying migrations", async (
     assert.ok(
       columns.rows.some((row) => row.column_name === "config_snapshot"),
     );
+    for (const name of [
+      "started_at",
+      "finished_at",
+      "error_code",
+      "error_message",
+    ]) {
+      assert.ok(columns.rows.some((row) => row.column_name === name));
+    }
+    assert.equal(
+      (await db.query("SELECT to_regclass('step_run')::text AS name")).rows[0]
+        .name,
+      "step_run",
+    );
     await migrate(url);
     const second = await db.query("SELECT version FROM schema_migration");
-    assert.equal(second.rowCount, 2);
+    assert.equal(second.rowCount, 3);
+  });
+});
+
+test("upgrades populated Milestone 02 runs without changing snapshot, answers, or cursor", async () => {
+  await withSchema(async (db, url) => {
+    await db.query(await readFile("db/001_init.sql", "utf8"));
+    await db.query(await readFile("db/002_workflow_config.sql", "utf8"));
+    await db.query(
+      "CREATE TABLE schema_migration (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())",
+    );
+    await db.query(
+      "INSERT INTO schema_migration (version) VALUES ('001_init'), ('002_workflow_config')",
+    );
+    const workflow = await db.query<{ id: string }>(
+      "INSERT INTO workflow (name, form_id, enabled, enabled_at, config_json) VALUES ('Consultation', 'form', true, '2026-10-08T10:00:00Z', '{}'::jsonb) RETURNING id",
+    );
+    const id = workflow.rows[0].id;
+    await db.query(
+      "INSERT INTO form_poll_state (workflow_id, cursor_at) VALUES ($1, '2026-10-08T11:00:00Z')",
+      [id],
+    );
+    await db.query(
+      "INSERT INTO run (workflow_id, response_id, create_time, last_submitted_time, answers_json, config_snapshot) VALUES ($1, 'new', '2026-10-08T10:30:00Z', '2026-10-08T10:30:00Z', '{\"sentinel\":true}'::jsonb, '{\"formId\":\"form\"}'::jsonb)",
+      [id],
+    );
+    await db.query(
+      "INSERT INTO run (workflow_id, response_id, create_time, last_submitted_time, answers_json) VALUES ($1, 'legacy', '2026-10-08T10:31:00Z', '2026-10-08T10:31:00Z', '{}'::jsonb)",
+      [id],
+    );
+
+    await migrate(url);
+    const rows = await db.query<{
+      response_id: string;
+      state: string;
+      config_snapshot: unknown;
+      answers_json: unknown;
+      cursor_at: Date;
+    }>(
+      "SELECT r.response_id, r.state, r.config_snapshot, r.answers_json, p.cursor_at FROM run r JOIN form_poll_state p ON p.workflow_id = r.workflow_id ORDER BY r.response_id",
+    );
+    assert.deepEqual(
+      rows.rows.map((row) => row.response_id),
+      ["legacy", "new"],
+    );
+    assert.equal(rows.rows[0].config_snapshot, null);
+    assert.deepEqual(rows.rows[1].config_snapshot, { formId: "form" });
+    assert.deepEqual(rows.rows[1].answers_json, { sentinel: true });
+    assert.ok(
+      rows.rows.every(
+        (row) =>
+          row.state === "queued" &&
+          row.cursor_at.toISOString() === "2026-10-08T11:00:00.000Z",
+      ),
+    );
+    await assert.rejects(
+      db.query("UPDATE run SET state = 'unknown' WHERE response_id = 'new'"),
+      /run_state_check/,
+    );
+    const run = await db.query<{ id: string }>(
+      "SELECT id FROM run WHERE response_id = 'new'",
+    );
+    await db.query(
+      "INSERT INTO step_run (run_id, step_name) VALUES ($1, 'filter')",
+      [run.rows[0].id],
+    );
+    await assert.rejects(
+      db.query(
+        "INSERT INTO step_run (run_id, step_name) VALUES ($1, 'filter')",
+        [run.rows[0].id],
+      ),
+      /step_run_pkey/,
+    );
+    await assert.rejects(
+      db.query(
+        "INSERT INTO step_run (run_id, step_name) VALUES ($1, 'other')",
+        [run.rows[0].id],
+      ),
+      /step_run_step_name_check/,
+    );
+    await assert.rejects(
+      db.query("UPDATE step_run SET attempt_count = -1 WHERE run_id = $1", [
+        run.rows[0].id,
+      ]),
+      /step_run_attempt_count_check/,
+    );
+    await migrate(url);
+    assert.equal(
+      (await db.query("SELECT version FROM schema_migration")).rowCount,
+      3,
+    );
   });
 });
 

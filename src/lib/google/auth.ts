@@ -1,6 +1,27 @@
 import { readFile } from "node:fs/promises";
 import { OAuth2Client } from "google-auth-library";
 
+export const googleScopes = [
+  "https://www.googleapis.com/auth/forms.responses.readonly",
+  "https://www.googleapis.com/auth/forms.body.readonly",
+  "https://www.googleapis.com/auth/calendar.events.owned",
+  "https://www.googleapis.com/auth/gmail.send",
+];
+
+export function getGoogleSenderEmail(
+  env: Record<string, string | undefined> = process.env,
+): string {
+  const value = env.GOOGLE_SENDER_EMAIL?.trim();
+  if (!value) throw new Error("Missing GOOGLE_SENDER_EMAIL");
+  if (
+    !/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(value) ||
+    value.includes("..")
+  ) {
+    throw new Error("Invalid GOOGLE_SENDER_EMAIL");
+  }
+  return value;
+}
+
 export function googleConfig(): {
   clientId: string;
   clientSecret: string;

@@ -3,12 +3,7 @@ import { createServer } from "node:http";
 import { chmod, mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
 import { OAuth2Client } from "google-auth-library";
-import { googleConfig } from "../src/lib/google/auth";
-
-const scopes = [
-  "https://www.googleapis.com/auth/forms.responses.readonly",
-  "https://www.googleapis.com/auth/forms.body.readonly",
-];
+import { googleConfig, googleScopes } from "../src/lib/google/auth";
 const redirectUri = "http://127.0.0.1:8765/oauth2callback";
 
 async function main(): Promise<void> {
@@ -69,7 +64,7 @@ async function main(): Promise<void> {
       client.generateAuthUrl({
         access_type: "offline",
         prompt: "consent",
-        scope: scopes,
+        scope: googleScopes,
         state,
       }),
     );
