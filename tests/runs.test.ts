@@ -3,6 +3,8 @@ import { after, test } from "node:test";
 import { Pool } from "pg";
 import { insertRunIfAbsent, listRuns } from "../src/lib/runs";
 import { saveWorkflow } from "../src/lib/workflows";
+import type { RunConfigSnapshot } from "../src/lib/workflow-config";
+import { config, metadata } from "./workflow-fixtures";
 
 const connectionString = process.env.TEST_DATABASE_URL;
 if (!connectionString) throw new Error("Missing TEST_DATABASE_URL");
@@ -43,6 +45,7 @@ test("response IDs are unique per workflow and queued runs survive a new connect
         new Set(["response-1", "response-2"]),
       );
       assert.ok(runs.every((run) => run.state === "queued"));
+      assert.ok(runs.every((run) => run.configSnapshot === null));
       assert.deepEqual(
         runs.find((run) => run.responseId === "response-1")?.answers,
         response.answers,
@@ -85,6 +88,42 @@ test("run insertion participates in the caller's transaction", async () => {
   } finally {
     await client.query("ROLLBACK").catch(() => {});
     client.release();
+    await db.query("DELETE FROM workflow WHERE id = $1", [workflow.id]);
+  }
+});
+
+test("a recorded run retains its source Form and configuration", async () => {
+  const workflow = await saveWorkflow(
+    { name: "Snapshot", formId: "form-1", config },
+    db,
+    metadata,
+  );
+  const snapshot: RunConfigSnapshot = {
+    formId: "form-1",
+    config: {
+      ...config,
+      calendarId: "primary",
+      timeZone: "America/Los_Angeles",
+      filter: { equals: "Consultation" },
+    },
+  };
+  try {
+    await insertRunIfAbsent(
+      workflow.id,
+      {
+        responseId: "snapshot-response",
+        createTime: "2026-10-08T10:00:00.000Z",
+        lastSubmittedTime: "2026-10-08T10:00:00.000Z",
+        answers: {},
+      },
+      db,
+      snapshot,
+    );
+    const run = (await listRuns(db)).find(
+      (item) => item.workflowId === workflow.id,
+    );
+    assert.deepEqual(run?.configSnapshot, snapshot);
+  } finally {
     await db.query("DELETE FROM workflow WHERE id = $1", [workflow.id]);
   }
 });

@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from "pg";
 import { getDb } from "./db";
+import type { RunConfigSnapshot } from "./workflow-config";
 
 export type FormResponse = {
   responseId: string;
@@ -15,6 +16,7 @@ export type Run = {
   createTime: Date;
   lastSubmittedTime: Date;
   answers: Record<string, unknown>;
+  configSnapshot: RunConfigSnapshot | null;
   state: string;
   createdAt: Date;
 };
@@ -26,6 +28,7 @@ type RunRow = {
   create_time: Date;
   last_submitted_time: Date;
   answers_json: Record<string, unknown>;
+  config_snapshot: RunConfigSnapshot | null;
   state: string;
   created_at: Date;
 };
@@ -34,10 +37,11 @@ export async function insertRunIfAbsent(
   workflowId: string,
   response: FormResponse,
   db: Pool | PoolClient = getDb(),
+  snapshot: RunConfigSnapshot | null = null,
 ): Promise<boolean> {
   const result = await db.query(
-    `INSERT INTO run (workflow_id, response_id, create_time, last_submitted_time, answers_json)
-     VALUES ($1, $2, $3, $4, $5::jsonb)
+    `INSERT INTO run (workflow_id, response_id, create_time, last_submitted_time, answers_json, config_snapshot)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb)
      ON CONFLICT (workflow_id, response_id) DO NOTHING
      RETURNING id`,
     [
@@ -46,6 +50,7 @@ export async function insertRunIfAbsent(
       response.createTime,
       response.lastSubmittedTime,
       JSON.stringify(response.answers),
+      snapshot === null ? null : JSON.stringify(snapshot),
     ],
   );
   return result.rowCount === 1;
@@ -53,7 +58,7 @@ export async function insertRunIfAbsent(
 
 export async function listRuns(db: Pool = getDb()): Promise<Run[]> {
   const result = await db.query<RunRow>(
-    `SELECT id, workflow_id, response_id, create_time, last_submitted_time, answers_json, state, created_at
+    `SELECT id, workflow_id, response_id, create_time, last_submitted_time, answers_json, config_snapshot, state, created_at
      FROM run ORDER BY created_at DESC, id DESC`,
   );
   return result.rows.map((row) => ({
@@ -63,6 +68,7 @@ export async function listRuns(db: Pool = getDb()): Promise<Run[]> {
     createTime: row.create_time,
     lastSubmittedTime: row.last_submitted_time,
     answers: row.answers_json,
+    configSnapshot: row.config_snapshot,
     state: row.state,
     createdAt: row.created_at,
   }));

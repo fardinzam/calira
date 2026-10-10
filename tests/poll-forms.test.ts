@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { Pool } from "pg";
 import type { FormResponse } from "../src/lib/runs";
-import { saveWorkflow, setWorkflowEnabled } from "../src/lib/workflows";
+import {
+  saveWorkflow,
+  setWorkflowEnabled,
+  updateWorkflow,
+} from "../src/lib/workflows";
 import { pollEnabledWorkflows, pollWorkflow } from "../src/worker/poll-forms";
 import { config, metadataFor } from "./workflow-fixtures";
 
@@ -365,5 +369,127 @@ test("revoked authorization yields a safe reconnect instruction for the cycle", 
       "Google authorization expired or revoked; reconnect the owner account",
     );
     assert.equal((await state(id)).cursor, at(0));
+  });
+});
+
+test("a run keeps its original configuration while a later run captures an edit", async () => {
+  await withWorkflow(async (id) => {
+    const forms = {
+      async listFormResponses(_formId: string, since: Date) {
+        return {
+          responses:
+            since.getTime() <= baseline.getTime()
+              ? [response("before-edit", 1)]
+              : [response("before-edit", 1), response("after-edit", 2)],
+        };
+      },
+    };
+    await pollWorkflow(id, forms, db);
+    await updateWorkflow(
+      id,
+      {
+        name: "Polling test",
+        formId: "form-test",
+        config: {
+          ...config,
+          gmail: { ...config.gmail, subject: "Updated subject" },
+        },
+      },
+      db,
+      metadataFor("form-test"),
+    );
+    await pollWorkflow(id, forms, db);
+    const stored = await db.query<{
+      response_id: string;
+      config_snapshot: {
+        formId: string;
+        config: { gmail: { subject: string } };
+      };
+    }>(
+      "SELECT response_id, config_snapshot FROM run WHERE workflow_id = $1 ORDER BY response_id",
+      [id],
+    );
+    assert.deepEqual(
+      stored.rows.map((row) => [
+        row.response_id,
+        row.config_snapshot.formId,
+        row.config_snapshot.config.gmail.subject,
+      ]),
+      [
+        ["after-edit", "form-test", "Updated subject"],
+        ["before-edit", "form-test", "Request from {{name}}"],
+      ],
+    );
+  });
+});
+
+test("an edit during page fetch is captured under the final row lock", async () => {
+  await withWorkflow(async (id) => {
+    let releaseFetch!: () => void;
+    let fetchStarted!: () => void;
+    const fetching = new Promise<void>((resolve) => {
+      fetchStarted = resolve;
+    });
+    const resume = new Promise<void>((resolve) => {
+      releaseFetch = resolve;
+    });
+    const polling = pollWorkflow(
+      id,
+      {
+        async listFormResponses() {
+          fetchStarted();
+          await resume;
+          return { responses: [response("concurrent-edit", 1)] };
+        },
+      },
+      db,
+    );
+    await fetching;
+    await updateWorkflow(
+      id,
+      {
+        name: "Polling test",
+        formId: "form-test",
+        config: {
+          ...config,
+          gmail: { ...config.gmail, subject: "Edited during fetch" },
+        },
+      },
+      db,
+      metadataFor("form-test"),
+    );
+    releaseFetch();
+    await polling;
+    const stored = await db.query<{
+      config_snapshot: { config: { gmail: { subject: string } } };
+    }>("SELECT config_snapshot FROM run WHERE workflow_id = $1", [id]);
+    assert.equal(
+      stored.rows[0].config_snapshot.config.gmail.subject,
+      "Edited during fetch",
+    );
+  });
+});
+
+test("changing a disabled workflow's Form leaves the recorded source Form unchanged", async () => {
+  await withWorkflow(async (id) => {
+    await pollWorkflow(
+      id,
+      {
+        async listFormResponses() {
+          return { responses: [response("old-form-response", 1)] };
+        },
+      },
+      db,
+    );
+    await setWorkflowEnabled(id, false, new Date(at(2)), db);
+    await updateWorkflow(
+      id,
+      { name: "Polling test", formId: "replacement-form" },
+      db,
+    );
+    const stored = await db.query<{
+      config_snapshot: { formId: string };
+    }>("SELECT config_snapshot FROM run WHERE workflow_id = $1", [id]);
+    assert.equal(stored.rows[0].config_snapshot.formId, "form-test");
   });
 });

@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import { insertRunIfAbsent, type FormResponse } from "../lib/runs";
 import { listEnabledWorkflows } from "../lib/workflows";
+import type { WorkflowConfig } from "../lib/workflow-config";
 
 type FormsClient = {
   listFormResponses(
@@ -15,6 +16,7 @@ type FormsClient = {
 
 type PollRow = {
   form_id: string;
+  config_json: WorkflowConfig | null;
   enabled: boolean;
   enabled_at: Date | null;
   cursor_at: Date | null;
@@ -40,7 +42,7 @@ export async function pollWorkflow(
     if (!locked) return;
 
     const starting = await client.query<PollRow>(
-      `SELECT w.form_id, w.enabled, w.enabled_at, p.cursor_at
+      `SELECT w.form_id, w.config_json, w.enabled, w.enabled_at, p.cursor_at
        FROM workflow w JOIN form_poll_state p ON p.workflow_id = w.id
        WHERE w.id = $1`,
       [workflowId],
@@ -64,7 +66,7 @@ export async function pollWorkflow(
     await client.query("BEGIN");
     try {
       const current = await client.query<PollRow>(
-        `SELECT w.form_id, w.enabled, w.enabled_at, p.cursor_at
+        `SELECT w.form_id, w.config_json, w.enabled, w.enabled_at, p.cursor_at
          FROM workflow w JOIN form_poll_state p ON p.workflow_id = w.id
          WHERE w.id = $1 FOR UPDATE OF w, p`,
         [workflowId],
@@ -81,9 +83,12 @@ export async function pollWorkflow(
       }
 
       let cursor = since;
+      const snapshot = latest.config_json
+        ? { formId: latest.form_id, config: latest.config_json }
+        : null;
       for (const response of responses) {
         if (Date.parse(response.createTime) >= workflow.enabled_at.getTime()) {
-          await insertRunIfAbsent(workflowId, response, client);
+          await insertRunIfAbsent(workflowId, response, client, snapshot);
         }
         const submitted = new Date(response.lastSubmittedTime);
         if (submitted > cursor) cursor = submitted;
