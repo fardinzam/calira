@@ -1,6 +1,6 @@
 # Milestone 02 — Complete workflow configuration
 
-**Status:** In progress; Tasks 1–2 are complete and Task 3 is in review. This plan implements [Milestone 02 in the roadmap](../roadmap.md). [Product](../product.md) controls user-visible behavior; [architecture](../architecture.md) controls technical design; [decisions](../decisions.md) records the reference choices. Milestone 01 is complete. Milestone 03 owns Filter execution and Calendar/Gmail calls.
+**Status:** In progress; Tasks 1–3 are complete and Task 4 is next. This plan implements [Milestone 02 in the roadmap](../roadmap.md). [Product](../product.md) controls user-visible behavior; [architecture](../architecture.md) controls technical design; [decisions](../decisions.md) records the reference choices. Milestone 01 is complete. Milestone 03 owns Filter execution and Calendar/Gmail calls.
 
 ## Reviewable result
 
@@ -126,7 +126,7 @@ Before any commit, inspect the diff and verify the configured Git author/committ
 
 - [x] Task 1 — migration and shared configuration contract (`e66c955`; owner committed and pushed)
 - [x] Task 2 — immutable run snapshots (reviewed and locally committed)
-- [ ] Task 3 — Form metadata and OAuth scope
+- [x] Task 3 — Form metadata and OAuth scope (reviewed and locally committed)
 - [ ] Task 4 — builder, editing, and preview
 - [ ] Task 5 — status, landing page, and enable flow
 - [ ] Task 6 — integration and milestone acceptance
@@ -149,3 +149,5 @@ Before any commit, inspect the diff and verify the configured Git author/committ
 - 2026-10-09: The owner revised the Milestone 02 workflow again: only the main agent may stage, commit, or push after its own approval and separate critic approval. Per-task owner review is no longer required; owner review remains at the milestone gate. The earlier progress note remains a record of the previous instruction, not the current execution rule.
 - 2026-10-09: The owner confirmed Task 1 was committed and pushed as `e66c955`. The main agent checked the commit contains the Task 1 files and the prior 39/39 test, typecheck, lint, build, migration, and critic re-review evidence, then marked Task 1 complete without rewriting it. The owner now prohibits any further push or merge during Milestone 02; reviewed remaining tasks receive local commits only. The pre-existing unrelated work in `docs/plans/01-milestone.md`, `next-env.d.ts`, and `docs/plans/post-mvp-roadmap.md` was excluded from milestone task commits.
 - 2026-10-09: Task 2 now captures the final locked workflow Form ID and configuration in each new run within the cursor transaction. Tests cover later edits, an edit during fetch, Form ID changes after disable, duplicate responses, rollback, and legacy null snapshots. The read-only critic found `configSnapshot` on the wrong TypeScript type; the main agent corrected it and added an explicit snapshot fixture. Scoped re-review found no remaining blocking issue. The main agent ran `npm test` against `automator_m01_test` with `PGPASSWORD` limited to the test process (48/48 passed), `npx tsc --noEmit`, `npm run lint`, scoped Prettier, and `git diff --check` (all passed). Task 2 was locally committed after the code and plan reviews; no push or merge was performed.
+
+- 2026-10-09: Task 3 added server-side Forms question metadata and the `forms.body.readonly` OAuth scope while retaining response-list access. The read-only critic found that missing local-token errors were masked as Form-access errors; the Forms implementer preserved the safe reconnect instruction and added a failing-first regression test. Scoped re-review found no remaining blocker. After the owner refreshed consent, the live API returned six supported questions: two short text, one multiple choice, one date, one time, and one paragraph; no credentials or answer values were printed. The Form currently has optional Request type and Time questions and lacks an exact `Consultation` choice, so the owner was asked to correct those before Task 6 acceptance. Metadata access itself is verified; complete reference-Form validation remains pending. The Forms implementer passed 6/6 focused tests, typecheck, lint, and scoped Prettier; after integration the main agent passed `npm test` 49/49 with `PGPASSWORD` limited to the test process, `npx tsc --noEmit`, `npm run lint`, `npm run build`, scoped Prettier, and `git diff --check`. Task 3 was locally committed after review; no push or merge was performed.

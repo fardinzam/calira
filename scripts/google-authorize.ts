@@ -5,7 +5,10 @@ import { dirname, relative, resolve, sep } from "node:path";
 import { OAuth2Client } from "google-auth-library";
 import { googleConfig } from "../src/lib/google/auth";
 
-const scope = "https://www.googleapis.com/auth/forms.responses.readonly";
+const scopes = [
+  "https://www.googleapis.com/auth/forms.responses.readonly",
+  "https://www.googleapis.com/auth/forms.body.readonly",
+];
 const redirectUri = "http://127.0.0.1:8765/oauth2callback";
 
 async function main(): Promise<void> {
@@ -66,7 +69,7 @@ async function main(): Promise<void> {
       client.generateAuthUrl({
         access_type: "offline",
         prompt: "consent",
-        scope,
+        scope: scopes,
         state,
       }),
     );
