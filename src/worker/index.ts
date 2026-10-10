@@ -1,11 +1,16 @@
 import { setTimeout } from "node:timers/promises";
 import { getDb } from "../lib/db";
 import { getGoogleAuth } from "../lib/google/auth";
+import { calendarClient } from "../lib/google/calendar";
 import { listFormResponses } from "../lib/google/forms";
+import { gmailClient } from "../lib/google/gmail";
+import { executePendingRuns } from "./execute-runs";
 import { pollEnabledWorkflows } from "./poll-forms";
 
 async function pollOnce() {
-  return pollEnabledWorkflows({ listFormResponses }, getDb());
+  const failure = await pollEnabledWorkflows({ listFormResponses }, getDb());
+  await executePendingRuns(calendarClient, gmailClient, getDb());
+  return failure;
 }
 
 async function main() {
@@ -28,7 +33,7 @@ async function main() {
       const failure = await pollOnce();
       if (failure) console.error(failure);
     } catch {
-      console.error("Forms polling failed; retrying next cycle");
+      console.error("Worker cycle failed; retrying next cycle");
     }
     await setTimeout(60_000);
   }
@@ -39,7 +44,7 @@ main().catch((error: unknown) => {
   console.error(
     /^(Missing GOOGLE_|GOOGLE_TOKEN_FILE)/.test(message)
       ? message
-      : "Forms polling failed",
+      : "Worker cycle failed",
   );
   process.exitCode = 1;
 });
