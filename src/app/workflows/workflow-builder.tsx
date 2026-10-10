@@ -177,7 +177,7 @@ export default function WorkflowBuilder({
     <div className="mt-6 space-y-8">
       <p className="text-sm text-gray-700">
         Configure Forms → Filter → Calendar → Gmail. Saving prepares the
-        workflow; Calendar and Gmail actions arrive in Milestone 03.
+        workflow; enable it to record and process new responses.
       </p>
       {error && (
         <p
@@ -450,8 +450,8 @@ export default function WorkflowBuilder({
           </p>
         )}
         <p className="text-xs text-gray-600">
-          A complete workflow can be enabled after saving. Action execution
-          starts in Milestone 03.
+          A complete workflow can be enabled after saving. The worker processes
+          qualifying responses while the workflow is enabled.
         </p>
       </section>
     </div>

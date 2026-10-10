@@ -11,10 +11,11 @@ export default async function RunsPage() {
       <Link href="/" className="text-sm underline">
         Home
       </Link>
-      <h1 className="mt-6 text-2xl font-semibold">Detected runs</h1>
+      <h1 className="mt-6 text-2xl font-semibold">Runs</h1>
       <p className="mt-3 text-sm text-gray-700">
-        Queued means the Form response was recorded. No workflow actions have
-        run in this milestone.
+        Queued means the Form response was recorded and is waiting for the
+        worker. Older responses without a saved configuration remain detection
+        history.
       </p>
       <RunList runs={runs.slice(0, 20)} />
     </main>

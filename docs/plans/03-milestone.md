@@ -215,29 +215,31 @@ Only the main agent changes these types after review. A client marks `rejected` 
 - [x] Task 3 — Filter and pre-action validation; critic approved; committed locally
 - [x] Task 4 — Calendar adapter; critic approved; committed locally
 - [x] Task 5 — Gmail adapter; critic approved; committed locally
-- [ ] Task 6 — run-detail UI; critic approved; local commit or owner review:
+- [x] Task 6 — run-detail UI; critic approved; committed locally
 - [ ] Task 7 — worker orchestration; critic approved; local commit or owner review:
 - [ ] Task 8 — integration/live acceptance; final critic approved; local commit or owner review:
 
-| Check                                       | Actual command or observation          | Result/date                             | Remaining issue                                                                  |
-| ------------------------------------------- | -------------------------------------- | --------------------------------------- | -------------------------------------------------------------------------------- |
-| Fresh and upgraded migration, repeat        | Task 1 migration tests                 | 3/3 passed, 2026-10-10                  |                                                                                  |
-| Focused and full tests                      | Task 1 `npm test`; Task 2 focused/full | 65/65; 6/6 and 87/87 passed, 2026-10-10 |                                                                                  |
-| Full suite during concurrent Task 6 UI work | `npm test`                             | 98/99 passed, 2026-10-10                | Existing workflow UI test expects removed Milestone 02 copy; integration pending |
-| Typecheck, lint, build, format, diff check  | Tasks 1–2 named checks                 | Passed, 2026-10-10                      |                                                                                  |
-| Consent and owner-controlled resources      |                                        | Pending                                 |                                                                                  |
-| Qualifying live run and IDs                 |                                        | Pending                                 |                                                                                  |
-| Filtered live run, no action                |                                        | Pending                                 |                                                                                  |
-| Re-poll duplicate check                     |                                        | Pending                                 |                                                                                  |
-| Browser run detail and owner inbox check    |                                        | Pending                                 |                                                                                  |
+| Check                                       | Actual command or observation                                   | Result/date                                               | Remaining issue                                                                  |
+| ------------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Fresh and upgraded migration, repeat        | Task 1 migration tests                                          | 3/3 passed, 2026-10-10                                    |                                                                                  |
+| Focused and full tests                      | Task 1 `npm test`; Task 2 focused/full                          | 65/65; 6/6 and 87/87 passed, 2026-10-10                   |                                                                                  |
+| Full suite during concurrent Task 6 UI work | `npm test`                                                      | 98/99 passed, 2026-10-10                                  | Existing workflow UI test expects removed Milestone 02 copy; integration pending |
+| Task 6 UI and integration copy              | `npm test`; `npx tsc --noEmit`; `npm run lint`; `npm run build` | 106/106 passed; typecheck, lint, build passed, 2026-10-10 | Stale copy/assertion fixed                                                       |
+| Typecheck, lint, build, format, diff check  | Tasks 1–2 named checks                                          | Passed, 2026-10-10                                        |                                                                                  |
+| Consent and owner-controlled resources      |                                                                 | Pending                                                   |                                                                                  |
+| Qualifying live run and IDs                 |                                                                 | Pending                                                   |                                                                                  |
+| Filtered live run, no action                |                                                                 | Pending                                                   |                                                                                  |
+| Re-poll duplicate check                     |                                                                 | Pending                                                   |                                                                                  |
+| Browser run detail and owner inbox check    |                                                                 | Pending                                                   |                                                                                  |
 
-| Task/reviewer | Concrete finding                                                                                          | Resolution and scoped re-review                                                              |
-| ------------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| Task 1 critic | Sender accepted group/comment/control syntax                                                              | Failing-first cases added; stricter mailbox reader; scoped re-review approved, 2026-10-10    |
-| Task 2 critic | Missing disable/claim race and intermediate boundary assertions; legacy detail could show artificial rows | Added lock race/boundary checks; legacy rows hidden; scoped re-review approved, 2026-10-10   |
-| Task 4 critic | Google client could retry an insert despite one adapter call                                              | Disabled SDK retry and added option assertion; scoped re-review approved, 2026-10-10         |
-| Task 5 critic | No blocker; Task 3 must validate recipient syntax strictly before Calendar                                | Task 3 mapping rejects malformed recipient syntax; Task 3 scoped review approved, 2026-10-10 |
-| Task 3 critic | Filter trimmed before equality; padded date/time, overlong DNS label, and year rollover needed rejection  | Added failing-first regressions and strict checks; scoped re-review approved, 2026-10-10     |
+| Task/reviewer | Concrete finding                                                                                          | Resolution and scoped re-review                                                                  |
+| ------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Task 1 critic | Sender accepted group/comment/control syntax                                                              | Failing-first cases added; stricter mailbox reader; scoped re-review approved, 2026-10-10        |
+| Task 2 critic | Missing disable/claim race and intermediate boundary assertions; legacy detail could show artificial rows | Added lock race/boundary checks; legacy rows hidden; scoped re-review approved, 2026-10-10       |
+| Task 4 critic | Google client could retry an insert despite one adapter call                                              | Disabled SDK retry and added option assertion; scoped re-review approved, 2026-10-10             |
+| Task 5 critic | No blocker; Task 3 must validate recipient syntax strictly before Calendar                                | Task 3 mapping rejects malformed recipient syntax; Task 3 scoped review approved, 2026-10-10     |
+| Task 3 critic | Filter trimmed before equality; padded date/time, overlong DNS label, and year rollover needed rejection  | Added failing-first regressions and strict checks; scoped re-review approved, 2026-10-10         |
+| Task 6 critic | No blocking defect; existing workflow UI assertion expected removed Milestone 02 text                     | Main agent updated stale page/builder copy and assertions; scoped re-review approved, 2026-10-10 |
 
 ## Final owner review gate
 

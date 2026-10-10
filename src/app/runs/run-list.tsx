@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { Run } from "@/lib/runs";
 
 export default function RunList({ runs }: { runs: Run[] }) {
@@ -11,7 +12,12 @@ export default function RunList({ runs }: { runs: Run[] }) {
     <ul className="mt-3 space-y-3">
       {runs.map((run) => (
         <li key={run.id} className="rounded border border-gray-300 p-4 text-sm">
-          <p>Run ID: {run.id}</p>
+          <p>
+            Run ID:{" "}
+            <Link href={`/runs/${run.id}`} className="underline">
+              {run.id}
+            </Link>
+          </p>
           <p>Response ID: {run.responseId}</p>
           <p>
             Submitted:{" "}
@@ -19,7 +25,10 @@ export default function RunList({ runs }: { runs: Run[] }) {
               {run.lastSubmittedTime.toISOString()}
             </time>
           </p>
-          <p>State: {run.state === "queued" ? "Queued" : run.state}</p>
+          <p>
+            State: {run.state[0].toUpperCase()}
+            {run.state.slice(1).replaceAll("_", " ")}
+          </p>
         </li>
       ))}
     </ul>

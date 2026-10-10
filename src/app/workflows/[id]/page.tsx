@@ -69,8 +69,8 @@ export default async function EditWorkflow({
           {workflow.enabled ? "Disable polling" : "Enable polling"}
         </button>
         <p className="mt-2 text-sm text-gray-700">
-          Polling records detected responses. Calendar and Gmail execution
-          arrives in Milestone 03.
+          Polling records new responses. The worker processes eligible runs
+          while this workflow is enabled.
         </p>
       </form>
     </main>

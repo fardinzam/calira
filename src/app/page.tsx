@@ -24,9 +24,8 @@ export default async function Home({
       <p className="mt-3 text-sm text-gray-700">
         For consultation requests: read new Google Forms responses, continue
         when the Filter matches Consultation, then plan a Google Calendar event
-        and Gmail acknowledgement. Polling can detect responses now. Calendar
-        and Gmail execution arrives in Milestone 03, even when a workflow is
-        enabled.
+        and Gmail acknowledgement. New responses are recorded by polling, then
+        eligible runs are processed by the worker.
       </p>
       <div className="mt-6 flex gap-4 text-sm">
         <Link href="/workflows/new" className="underline">
@@ -113,11 +112,11 @@ export default async function Home({
       </section>
 
       <section className="mt-10">
-        <h2 className="text-lg font-semibold">Recent detected runs</h2>
+        <h2 className="text-lg font-semibold">Recent runs</h2>
         <p className="mt-1 text-sm text-gray-700">
-          Queued means detected, not executed. Milestone 01 runs without a
+          Queued means recorded and waiting for the worker. Older runs without a
           configuration snapshot remain detection history and cannot execute
-          actions. Runs with a snapshot may execute when Milestone 03 is built.
+          actions.
         </p>
         <RunList runs={runs.slice(0, 10)} />
       </section>

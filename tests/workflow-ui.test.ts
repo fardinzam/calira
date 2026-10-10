@@ -487,7 +487,7 @@ test("metadata and save actions return safe errors for blank setup", async () =>
   assert.deepEqual(result, { error: "Workflow name is required" });
 });
 
-test("home explains the consultation flow and milestone limits", async () => {
+test("home explains the consultation flow and run states", async () => {
   const { default: Home } = await homePage;
   const html = renderToStaticMarkup(
     await Home({ searchParams: Promise.resolve({ error: "configuration" }) }),
@@ -497,13 +497,13 @@ test("home explains the consultation flow and milestone limits", async () => {
   assert.match(html, /Filter/);
   assert.match(html, /Google Calendar/);
   assert.match(html, /Gmail/);
-  assert.match(html, /Milestone 03/);
+  assert.match(html, /eligible runs are processed by the worker/);
   assert.match(html, /href="\/workflows\/new"/);
   assert.match(html, /href="\/runs"/);
   assert.match(html, /Review the workflow configuration/);
   assert.match(
     html,
-    /Milestone 01 runs without a configuration snapshot remain detection history/,
+    /Older runs without a configuration snapshot remain detection history/,
   );
   assert.doesNotMatch(html, /Earlier queued runs remain detection history/);
   assert.doesNotMatch(html, /action-ready|appointment confirmed/i);
@@ -609,7 +609,7 @@ test("home and edit page show a complete workflow enabled and disabled after rel
           await EditWorkflow({ params: Promise.resolve({ id: saved.id }) }),
         );
         assert.match(edit, /Status: Enabled/);
-        assert.match(edit, /Milestone 03/);
+        assert.match(edit, /worker processes eligible runs/);
         await assert.rejects(
           toggleWorkflow(toggleData(saved.id, false)),
           /NEXT_REDIRECT/,
