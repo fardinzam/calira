@@ -1,0 +1,276 @@
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { after, test } from "node:test";
+import { Pool } from "pg";
+import {
+  getRunDetail,
+  claimNextRun,
+  markFilteredOut,
+  markFilterFailed,
+  markValidationFailed,
+  markFilterMatched,
+  startCalendar,
+  finishCalendarSucceeded,
+  finishCalendarRejected,
+  startGmail,
+  finishGmailSucceeded,
+  finishGmailRejected,
+} from "../src/lib/run-execution";
+import { setWorkflowEnabled } from "../src/lib/workflows";
+import { config, metadata } from "./workflow-fixtures";
+
+const connectionString = process.env.TEST_DATABASE_URL;
+if (!connectionString) throw new Error("Missing TEST_DATABASE_URL");
+const admin = new Pool({ connectionString });
+after(() => admin.end());
+
+async function withSchema(body: (db: Pool) => Promise<void>) {
+  const schema = `m03_${randomUUID().replaceAll("-", "")}`;
+  await admin.query(`CREATE SCHEMA ${schema}`);
+  const url = new URL(connectionString!);
+  url.searchParams.set("options", `-csearch_path=${schema}`);
+  const db = new Pool({ connectionString: url.toString() });
+  try {
+    const { readFile } = await import("node:fs/promises");
+    for (const file of [
+      "001_init",
+      "002_workflow_config",
+      "003_run_execution",
+    ]) {
+      await db.query(await readFile(`db/${file}.sql`, "utf8"));
+    }
+    await body(db);
+  } finally {
+    await db.end();
+    await admin.query(`DROP SCHEMA ${schema} CASCADE`);
+  }
+}
+
+async function fixtureRun(
+  db: Pool,
+  options: { enabled?: boolean; snapshot?: boolean; responseId?: string } = {},
+) {
+  const workflow = await db.query<{ id: string }>(
+    "INSERT INTO workflow (name, form_id, enabled, enabled_at, config_json) VALUES ('Test', 'form-1', $1, now(), $2::jsonb) RETURNING id",
+    [options.enabled ?? true, JSON.stringify(config)],
+  );
+  const workflowId = workflow.rows[0].id;
+  await db.query("INSERT INTO form_poll_state (workflow_id) VALUES ($1)", [
+    workflowId,
+  ]);
+  const run = await db.query<{ id: string }>(
+    "INSERT INTO run (workflow_id, response_id, create_time, last_submitted_time, answers_json, config_snapshot) VALUES ($1, $2, now(), now(), $3::jsonb, $4::jsonb) RETURNING id",
+    [
+      workflowId,
+      options.responseId ?? randomUUID(),
+      JSON.stringify({ sentinel: "private-answer" }),
+      options.snapshot === false
+        ? null
+        : JSON.stringify({ formId: "form-1", config }),
+    ],
+  );
+  return { workflowId, runId: run.rows[0].id };
+}
+
+test("claim skips disabled and legacy runs, resumes queued work after enable, and lets a claimed run finish after disable", async () => {
+  await withSchema(async (db) => {
+    const disabled = await fixtureRun(db, { enabled: false });
+    const legacy = await fixtureRun(db, { snapshot: false });
+    assert.equal(await claimNextRun(db), null);
+    await setWorkflowEnabled(
+      disabled.workflowId,
+      true,
+      new Date(),
+      db,
+      metadata,
+    );
+    const claim = await claimNextRun(db);
+    assert.equal(claim?.id, disabled.runId);
+    assert.equal(claim?.snapshot !== null, true);
+    await setWorkflowEnabled(disabled.workflowId, false, new Date(), db);
+    await markFilteredOut(disabled.runId, db);
+    assert.equal(
+      (await getRunDetail(disabled.runId, db))?.state,
+      "filtered_out",
+    );
+    assert.equal(await claimNextRun(db), null);
+    assert.equal((await getRunDetail(legacy.runId, db))?.detectionOnly, true);
+  });
+});
+
+test("two concurrent claimers cannot claim the same queued run", async () => {
+  await withSchema(async (db) => {
+    const { runId } = await fixtureRun(db);
+    const [one, two] = await Promise.all([claimNextRun(db), claimNextRun(db)]);
+    assert.deepEqual([one?.id, two?.id].filter(Boolean), [runId]);
+    const detail = await getRunDetail(runId, db);
+    assert.equal(detail?.state, "running");
+    assert.deepEqual(
+      detail?.steps.map((step) => step.name),
+      ["filter", "calendar", "gmail"],
+    );
+    assert.ok(detail?.steps.every((step) => step.state === "pending"));
+  });
+});
+
+test("a workflow lock serializes disable against a queued claim", async () => {
+  await withSchema(async (db) => {
+    const { workflowId, runId } = await fixtureRun(db);
+    const lock = await db.connect();
+    try {
+      await lock.query("BEGIN");
+      await lock.query("SELECT id FROM workflow WHERE id = $1 FOR UPDATE", [
+        workflowId,
+      ]);
+      const disabling = setWorkflowEnabled(workflowId, false, new Date(), db);
+      assert.equal(await claimNextRun(db), null);
+      await lock.query("COMMIT");
+      await disabling;
+      assert.equal(await claimNextRun(db), null);
+      assert.equal((await getRunDetail(runId, db))?.state, "queued");
+    } finally {
+      await lock.query("ROLLBACK").catch(() => {});
+      lock.release();
+    }
+  });
+});
+
+test("filter and validation failures stop before action and preserve safe detail", async () => {
+  await withSchema(async (db) => {
+    const filtered = await fixtureRun(db);
+    await claimNextRun(db);
+    await markFilteredOut(filtered.runId, db);
+    const filteredDetail = await getRunDetail(filtered.runId, db);
+    assert.equal(filteredDetail?.state, "filtered_out");
+    assert.deepEqual(
+      filteredDetail?.steps.map((step) => step.state),
+      ["succeeded", "skipped", "skipped"],
+    );
+
+    const invalidFilter = await fixtureRun(db);
+    await claimNextRun(db);
+    await markFilterFailed(
+      invalidFilter.runId,
+      "invalid_filter_input",
+      "Request type answer is invalid",
+      db,
+    );
+    assert.deepEqual(
+      (await getRunDetail(invalidFilter.runId, db))?.steps.map(
+        (step) => step.state,
+      ),
+      ["failed", "skipped", "skipped"],
+    );
+
+    const invalidMapping = await fixtureRun(db);
+    await claimNextRun(db);
+    await markValidationFailed(
+      invalidMapping.runId,
+      "invalid_response",
+      "Required response value is invalid",
+      db,
+    );
+    const detail = await getRunDetail(invalidMapping.runId, db);
+    assert.equal(detail?.state, "failed");
+    assert.deepEqual(
+      detail?.steps.map((step) => step.state),
+      ["succeeded", "skipped", "skipped"],
+    );
+    assert.equal(detail?.error?.code, "invalid_response");
+    assert.doesNotMatch(JSON.stringify(detail), /private-answer/);
+  });
+});
+
+test("confirmed Calendar and Gmail boundaries retain IDs and distinguish definite failures", async () => {
+  await withSchema(async (db) => {
+    const calendarFailure = await fixtureRun(db);
+    await claimNextRun(db);
+    await markFilterMatched(calendarFailure.runId, db);
+    const eventId = await startCalendar(calendarFailure.runId, db);
+    assert.equal(eventId, `a${calendarFailure.runId.replaceAll("-", "")}`);
+    const beforeInsert = await getRunDetail(calendarFailure.runId, db);
+    assert.equal(beforeInsert?.steps[1].state, "running");
+    assert.equal(beforeInsert?.steps[1].externalId, eventId);
+    assert.equal(beforeInsert?.steps[1].attemptCount, 1);
+    assert.equal(await claimNextRun(db), null);
+    await finishCalendarRejected(
+      calendarFailure.runId,
+      "calendar_denied",
+      "Calendar rejected the event",
+      db,
+    );
+    const failed = await getRunDetail(calendarFailure.runId, db);
+    assert.equal(failed?.state, "failed");
+    assert.deepEqual(
+      failed?.steps.map((step) => step.state),
+      ["succeeded", "failed", "skipped"],
+    );
+    assert.equal(failed?.steps[1].attemptCount, 1);
+    assert.equal(failed?.steps[1].externalId, eventId);
+
+    const gmailFailure = await fixtureRun(db);
+    await claimNextRun(db);
+    await markFilterMatched(gmailFailure.runId, db);
+    const goodEventId = await startCalendar(gmailFailure.runId, db);
+    await finishCalendarSucceeded(gmailFailure.runId, goodEventId, db);
+    const beforeGmail = await getRunDetail(gmailFailure.runId, db);
+    assert.equal(beforeGmail?.steps[1].state, "succeeded");
+    assert.equal(beforeGmail?.steps[1].externalId, goodEventId);
+    assert.equal(beforeGmail?.steps[2].state, "pending");
+    await startGmail(gmailFailure.runId, db);
+    assert.equal(
+      (await getRunDetail(gmailFailure.runId, db))?.steps[2].state,
+      "running",
+    );
+    await finishGmailRejected(
+      gmailFailure.runId,
+      "gmail_denied",
+      "Gmail rejected the message",
+      db,
+    );
+    const partial = await getRunDetail(gmailFailure.runId, db);
+    assert.equal(partial?.state, "partially_failed");
+    assert.deepEqual(
+      partial?.steps.map((step) => step.state),
+      ["succeeded", "succeeded", "failed"],
+    );
+    assert.equal(partial?.steps[1].externalId, goodEventId);
+    assert.ok(partial?.steps[1].finishedAt);
+
+    const success = await fixtureRun(db);
+    await claimNextRun(db);
+    await markFilterMatched(success.runId, db);
+    const successEventId = await startCalendar(success.runId, db);
+    await finishCalendarSucceeded(success.runId, successEventId, db);
+    await startGmail(success.runId, db);
+    await finishGmailSucceeded(success.runId, "message-1", db);
+    const done = await getRunDetail(success.runId, db);
+    assert.equal(done?.state, "succeeded");
+    assert.deepEqual(
+      done?.steps.map((step) => step.state),
+      ["succeeded", "succeeded", "succeeded"],
+    );
+    assert.equal(done?.steps[2].externalId, "message-1");
+    assert.ok(done?.steps.every((step) => step.finishedAt));
+    await assert.rejects(startCalendar(success.runId, db));
+  });
+});
+
+test("queued snapshot detail synthesizes pending steps and legacy detail has none", async () => {
+  await withSchema(async (db) => {
+    const queued = await fixtureRun(db);
+    const legacy = await fixtureRun(db, { snapshot: false });
+    await db.query(
+      "INSERT INTO step_run (run_id, step_name) VALUES ($1, 'filter')",
+      [legacy.runId],
+    );
+    const detail = await getRunDetail(queued.runId, db);
+    assert.deepEqual(
+      detail?.steps.map((step) => step.state),
+      ["pending", "pending", "pending"],
+    );
+    assert.equal((await getRunDetail(legacy.runId, db))?.steps.length, 0);
+    assert.doesNotMatch(JSON.stringify(detail), /private-answer/);
+    assert.equal(await getRunDetail(randomUUID(), db), null);
+  });
+});

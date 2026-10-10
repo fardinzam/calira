@@ -134,11 +134,11 @@ Only the main agent changes these types after review. A client marks `rejected` 
 
 **Depends on:** Task 1 reviewed and integrated, with any commit governed by the resolved Git policy. **Owned files:** `src/lib/run-execution.ts`, `src/lib/runs.ts` only if the existing list needs state fields, `tests/run-execution.test.ts`, and focused run tests. No subagent edits these files.
 
-- [ ] Write failing database tests for two claimers racing, disabled workflow, null-snapshot legacy run, re-enable with queued runs, and disable after claim. Use disposable schemas; do not touch the Milestone 02 acceptance database.
-- [ ] Implement the single-row claim and fixed step rows. Claim locks the workflow and run, then commits `running` before returning the stored answers and snapshot to worker code. Old null-snapshot runs stay queued/detection-only.
-- [ ] Write failing transition tests for Filter mismatch, validation failure before action, Calendar rejection, Calendar success then Gmail rejection, and both successes. Assert step order, attempts, timestamps, safe summaries, IDs, and terminal run state in persisted rows.
-- [ ] Implement explicit transaction functions for those fixed transitions, with a pre-insert Calendar ID. Avoid a generic workflow transition framework. Implement `getRunDetail` with the safe read boundary above; test three synthesized pending steps for queued snapshot runs, no steps for legacy runs, and that answer sentinels cannot appear in either result.
-- [ ] Run focused tests, typecheck, lint, and build.
+- [x] Write failing database tests for two claimers racing, disabled workflow, null-snapshot legacy run, re-enable with queued runs, and disable after claim. Use disposable schemas; do not touch the Milestone 02 acceptance database.
+- [x] Implement the single-row claim and fixed step rows. Claim locks the workflow and run, then commits `running` before returning the stored answers and snapshot to worker code. Old null-snapshot runs stay queued/detection-only.
+- [x] Write failing transition tests for Filter mismatch, validation failure before action, Calendar rejection, Calendar success then Gmail rejection, and both successes. Assert step order, attempts, timestamps, safe summaries, IDs, and terminal run state in persisted rows.
+- [x] Implement explicit transaction functions for those fixed transitions, with a pre-insert Calendar ID. Avoid a generic workflow transition framework. Implement `getRunDetail` with the safe read boundary above; test three synthesized pending steps for queued snapshot runs, no steps for legacy runs, and that answer sentinels cannot appear in either result.
+- [x] Run focused tests, typecheck, lint, and build.
 
 **Acceptance:** No disabled/null-snapshot claim; exactly one claimer wins; confirmed successful steps are never overwritten; Calendar success survives Gmail failure; read result contains no answers. **Review/commit gate:** separate read-only critic checks locking against `setWorkflowEnabled`, transaction order, SQL constraints, and tests; resolve/re-review before main-agent local commit under the approved plan. Freeze `getRunDetail` and the transition API for UI and executor tasks.
 
@@ -211,7 +211,7 @@ Only the main agent changes these types after review. A client marks `rejected` 
 ## Progress and evidence
 
 - [x] Task 1 — migration, contract, and OAuth scopes; critic approved; committed locally
-- [ ] Task 2 — claims, transitions, and safe detail read; critic approved; local commit or owner review:
+- [x] Task 2 — claims, transitions, and safe detail read; critic approved; committed locally
 - [ ] Task 3 — Filter and pre-action validation; critic approved; local commit or owner review:
 - [ ] Task 4 — Calendar adapter; critic approved; local commit or owner review:
 - [ ] Task 5 — Gmail adapter; critic approved; local commit or owner review:
@@ -219,20 +219,21 @@ Only the main agent changes these types after review. A client marks `rejected` 
 - [ ] Task 7 — worker orchestration; critic approved; local commit or owner review:
 - [ ] Task 8 — integration/live acceptance; final critic approved; local commit or owner review:
 
-| Check                                      | Actual command or observation | Result/date              | Remaining issue |
-| ------------------------------------------ | ----------------------------- | ------------------------ | --------------- |
-| Fresh and upgraded migration, repeat       | Task 1 migration tests        | 3/3 passed, 2026-10-10   |                 |
-| Focused and full tests                     | Task 1 `npm test`             | 65/65 passed, 2026-10-10 |                 |
-| Typecheck, lint, build, format, diff check | Task 1 named checks           | Passed, 2026-10-10       |                 |
-| Consent and owner-controlled resources     |                               | Pending                  |                 |
-| Qualifying live run and IDs                |                               | Pending                  |                 |
-| Filtered live run, no action               |                               | Pending                  |                 |
-| Re-poll duplicate check                    |                               | Pending                  |                 |
-| Browser run detail and owner inbox check   |                               | Pending                  |                 |
+| Check                                      | Actual command or observation          | Result/date                             | Remaining issue |
+| ------------------------------------------ | -------------------------------------- | --------------------------------------- | --------------- |
+| Fresh and upgraded migration, repeat       | Task 1 migration tests                 | 3/3 passed, 2026-10-10                  |                 |
+| Focused and full tests                     | Task 1 `npm test`; Task 2 focused/full | 65/65; 6/6 and 87/87 passed, 2026-10-10 |                 |
+| Typecheck, lint, build, format, diff check | Tasks 1–2 named checks                 | Passed, 2026-10-10                      |                 |
+| Consent and owner-controlled resources     |                                        | Pending                                 |                 |
+| Qualifying live run and IDs                |                                        | Pending                                 |                 |
+| Filtered live run, no action               |                                        | Pending                                 |                 |
+| Re-poll duplicate check                    |                                        | Pending                                 |                 |
+| Browser run detail and owner inbox check   |                                        | Pending                                 |                 |
 
-| Task/reviewer | Concrete finding                             | Resolution and scoped re-review                                                           |
-| ------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| Task 1 critic | Sender accepted group/comment/control syntax | Failing-first cases added; stricter mailbox reader; scoped re-review approved, 2026-10-10 |
+| Task/reviewer | Concrete finding                                                                                          | Resolution and scoped re-review                                                            |
+| ------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Task 1 critic | Sender accepted group/comment/control syntax                                                              | Failing-first cases added; stricter mailbox reader; scoped re-review approved, 2026-10-10  |
+| Task 2 critic | Missing disable/claim race and intermediate boundary assertions; legacy detail could show artificial rows | Added lock race/boundary checks; legacy rows hidden; scoped re-review approved, 2026-10-10 |
 
 ## Final owner review gate
 
