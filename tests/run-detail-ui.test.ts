@@ -111,12 +111,15 @@ async function step(
     errorCode?: string;
     errorMessage?: string;
     attemptCount?: number;
+    nextAttemptAt?: string;
+    uncertainSendSeen?: boolean;
   } = {},
 ) {
   await db.query(
     `INSERT INTO step_run (run_id, step_name, state, attempt_count, started_at,
-                           finished_at, result_summary, external_id, error_code, error_message)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+                           finished_at, result_summary, external_id, error_code, error_message,
+                           next_attempt_at, uncertain_send_seen)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
     [
       runId,
       name,
@@ -132,14 +135,19 @@ async function step(
       fields.externalId ?? null,
       fields.errorCode ?? null,
       fields.errorMessage ?? null,
+      fields.nextAttemptAt ?? null,
+      fields.uncertainSendSeen ?? false,
     ],
   );
 }
 
-async function detailHtml(id: string) {
+async function detailHtml(id: string, retry?: string) {
   const { default: RunDetailPage } = await import("../src/app/runs/[id]/page");
   return renderToStaticMarkup(
-    await RunDetailPage({ params: Promise.resolve({ id }) }),
+    await RunDetailPage({
+      params: Promise.resolve({ id }),
+      searchParams: retry ? Promise.resolve({ retry }) : undefined,
+    }),
   );
 }
 
@@ -259,7 +267,7 @@ test("a Calendar failure shows its safe step error and skipped Gmail", async () 
   assert.match(html, /Gmail[\s\S]*Skipped/);
 });
 
-test("a partial failure retains the confirmed event and offers no retry yet", async () => {
+test("a definite Gmail failure retains the event and offers Gmail-only retry", async () => {
   const id = await fixtureRun("partially_failed");
   await step(id, "filter", "succeeded", {
     summary: "Filter matched",
@@ -278,7 +286,185 @@ test("a partial failure retains the confirmed event and offers no retry yet", as
   assert.match(html, /Partially failed/);
   assert.match(html, /Event ID:[\s\S]*retained-event/);
   assert.match(html, /gmail_rejected/);
-  assert.doesNotMatch(html, /<button|Retry/);
+  assert.match(html, /Calendar event retained/);
+  assert.match(html, /Gmail step failed/);
+  assert.match(html, /Retry Gmail only/);
+  assert.doesNotMatch(html, /duplicate email|type="checkbox"/i);
+});
+
+test("an uncertain Gmail send requires an unchecked duplicate-risk acknowledgment", async () => {
+  const id = await fixtureRun("partially_failed");
+  await step(id, "calendar", "succeeded", { externalId: "retained-event" });
+  await step(id, "gmail", "uncertain", {
+    errorCode: "gmail_outcome_unknown",
+    errorMessage: "Message may have been sent",
+    uncertainSendSeen: true,
+  });
+  const html = await detailHtml(id);
+  assert.match(html, /Send outcome uncertain/);
+  assert.match(html, /duplicate email/);
+  assert.match(html, /type="checkbox"/);
+  assert.doesNotMatch(html, /type="checkbox"[^>]*checked/);
+  assert.match(html, /Retry Gmail, possibly sending a duplicate/);
+  assert.match(html, /Calendar event retained/);
+});
+
+test("earlier uncertainty still requires warning after a later definite failure", async () => {
+  const id = await fixtureRun("partially_failed");
+  await step(id, "calendar", "succeeded", { externalId: "retained-event" });
+  await step(id, "gmail", "failed", { uncertainSendSeen: true });
+  assert.match(await detailHtml(id), /duplicate email/);
+});
+
+test("a scheduled retry shows its due time", async () => {
+  const id = await fixtureRun();
+  await step(id, "filter", "succeeded");
+  await step(id, "calendar", "pending", {
+    nextAttemptAt: "2026-10-10T12:10:00.000Z",
+    attemptCount: 1,
+  });
+  await step(id, "gmail", "pending");
+  const html = await detailHtml(id);
+  assert.match(html, /Retry scheduled/);
+  assert.match(html, /2026-10-10T12:10:00.000Z/);
+});
+
+test("a disabled workflow shows queued Gmail retry as paused", async () => {
+  const id = await fixtureRun();
+  await db.query(
+    "UPDATE workflow SET enabled = false WHERE id = (SELECT workflow_id FROM run WHERE id = $1)",
+    [id],
+  );
+  await step(id, "calendar", "succeeded", { externalId: "retained-event" });
+  await step(id, "gmail", "pending");
+  const html = await detailHtml(id);
+  assert.match(html, /Paused while workflow is disabled/);
+  assert.doesNotMatch(html, /Retry Gmail only|duplicate email/);
+});
+
+test("an unresolved Calendar outcome has no action form", async () => {
+  const id = await fixtureRun("failed");
+  await step(id, "calendar", "uncertain", { externalId: "reserved-event" });
+  await step(id, "gmail", "skipped");
+  const html = await detailHtml(id);
+  assert.match(html, /Calendar outcome unresolved/);
+  assert.doesNotMatch(html, /<form|Retry Gmail/);
+});
+
+test("retry result shows queued and running states and safe rejection", async () => {
+  const queuedId = await fixtureRun();
+  const forged = await detailHtml(queuedId, "queued");
+  assert.doesNotMatch(
+    forged,
+    /Gmail-only retry queued|Gmail step queued|Gmail step running/,
+  );
+
+  const retryId = await fixtureRun();
+  await step(retryId, "calendar", "succeeded", {
+    externalId: "retained-event",
+  });
+  await step(retryId, "gmail", "pending");
+  const queued = await detailHtml(retryId, "queued");
+  assert.match(queued, /Gmail step queued/);
+
+  const runningId = await fixtureRun("running");
+  await step(runningId, "calendar", "succeeded", {
+    externalId: "retained-event",
+  });
+  await step(runningId, "gmail", "running", { attemptCount: 2 });
+  const running = await detailHtml(runningId, "queued");
+  assert.match(running, /Gmail step running/);
+
+  const initialRunningId = await fixtureRun("running");
+  await step(initialRunningId, "calendar", "running", {
+    externalId: "reserved-event",
+  });
+  const initialRunning = await detailHtml(initialRunningId, "queued");
+  assert.doesNotMatch(initialRunning, /Gmail step running/);
+
+  const initialGmailId = await fixtureRun("running");
+  await step(initialGmailId, "calendar", "succeeded", {
+    externalId: "confirmed-event",
+  });
+  await step(initialGmailId, "gmail", "running", { attemptCount: 1 });
+  assert.doesNotMatch(
+    await detailHtml(initialGmailId, "queued"),
+    /Gmail step running/,
+  );
+
+  const rejected = await detailHtml(queuedId, "not_allowed");
+  assert.match(rejected, /Gmail retry was not queued/);
+  assert.doesNotMatch(
+    rejected,
+    /PRIVATE_ANSWER_SENTINEL|PRIVATE_EMAIL_BODY_SENTINEL/,
+  );
+});
+
+test("Gmail retry action requires acknowledgment and rejects repeated posts", async () => {
+  const id = await fixtureRun("partially_failed");
+  await step(id, "calendar", "succeeded", { externalId: "retained-event" });
+  await step(id, "gmail", "uncertain", { uncertainSendSeen: true });
+  const { retryGmailAction } = await import("../src/app/runs/[id]/actions");
+  const redirectedTo = (suffix: string) => (error: unknown) =>
+    error instanceof Error &&
+    "digest" in error &&
+    String(error.digest).includes(suffix);
+  await assert.rejects(
+    retryGmailAction(id, new FormData()),
+    redirectedTo("retry=warning_required"),
+  );
+  const invalid = new FormData();
+  invalid.set("acknowledgeDuplicateRisk", "true");
+  await assert.rejects(
+    retryGmailAction(id, invalid),
+    redirectedTo("retry=warning_required"),
+  );
+  const duplicated = new FormData();
+  duplicated.append("acknowledgeDuplicateRisk", "yes");
+  duplicated.append("acknowledgeDuplicateRisk", "yes");
+  await assert.rejects(
+    retryGmailAction(id, duplicated),
+    redirectedTo("retry=warning_required"),
+  );
+  const pending = await db.query(
+    "SELECT state FROM step_run WHERE run_id = $1 AND step_name = 'gmail'",
+    [id],
+  );
+  assert.equal(pending.rows[0].state, "uncertain");
+  const confirmed = new FormData();
+  confirmed.set("acknowledgeDuplicateRisk", "yes");
+  await assert.rejects(
+    retryGmailAction(id, confirmed),
+    redirectedTo("retry=queued"),
+  );
+  await assert.rejects(
+    retryGmailAction(id, confirmed),
+    redirectedTo("retry=not_allowed"),
+  );
+  const result = await db.query(
+    "SELECT state, retry_mode FROM step_run WHERE run_id = $1 AND step_name = 'gmail'",
+    [id],
+  );
+  assert.deepEqual(result.rows[0], { state: "pending", retry_mode: "manual" });
+});
+
+test("a definite Gmail rejection can be queued without an acknowledgment", async () => {
+  const id = await fixtureRun("partially_failed");
+  await step(id, "calendar", "succeeded", { externalId: "retained-event" });
+  await step(id, "gmail", "failed");
+  const { retryGmailAction } = await import("../src/app/runs/[id]/actions");
+  await assert.rejects(
+    retryGmailAction(id, new FormData()),
+    (error: unknown) =>
+      error instanceof Error &&
+      "digest" in error &&
+      String(error.digest).includes("retry=queued"),
+  );
+  const result = await db.query(
+    "SELECT state FROM step_run WHERE run_id = $1 AND step_name = 'gmail'",
+    [id],
+  );
+  assert.equal(result.rows[0].state, "pending");
 });
 
 test("a running Calendar step labels its reserved ID as planned", async () => {
