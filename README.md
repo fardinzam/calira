@@ -4,7 +4,7 @@ Automator is a focused workflow automation project for a solo service provider. 
 
 ## Current status
 
-Milestones 01 and 02 are complete. Milestone 03 implements the fixed consultation workflow, including Forms polling, Filter, Calendar, Gmail, and run detail; live acceptance passed and owner review is pending. Milestone 04 will add recovery and safe retry behavior.
+Milestones 01–03 are complete. Milestone 04 recovery and safe retry implementation passed final acceptance; owner review is pending.
 
 ## Run locally
 
@@ -19,4 +19,5 @@ Run `npm install`, configure the local values shown in `.env.example`, and run `
 - [Milestone 01 plan](docs/plans/01-milestone.md) — tasks, ownership, progress, and acceptance tests.
 - [Milestone 02 plan](docs/plans/02-milestone.md) — workflow configuration and Forms mapping.
 - [Milestone 03 plan](docs/plans/03-milestone.md) — working automation and live acceptance.
+- [Milestone 04 plan](docs/plans/04-milestone.md) — recovery, safe retry, and MVP acceptance.
 - [Interview evidence log](docs/interview-notes.md) — incidents and decisions to record during the build, not prepared answers.

@@ -23,9 +23,9 @@ export default async function Home({
       <h1 className="text-2xl font-semibold">Automator</h1>
       <p className="mt-3 text-sm text-gray-700">
         For consultation requests: read new Google Forms responses, continue
-        when the Filter matches Consultation, then plan a Google Calendar event
-        and Gmail acknowledgement. New responses are recorded by polling, then
-        eligible runs are processed by the worker.
+        when the Filter matches Consultation, then create a Google Calendar
+        event and send a Gmail acknowledgement. New responses are recorded by
+        polling, then eligible runs are processed by the worker.
       </p>
       <div className="mt-6 flex gap-4 text-sm">
         <Link href="/workflows/new" className="underline">
