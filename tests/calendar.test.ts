@@ -148,6 +148,43 @@ test("disables Google client retries for the event insert", async () => {
   );
 });
 
+test("local authorization setup failure rejects before any Calendar insert", async () => {
+  await withCalendarApi({}, async (calls) => {
+    process.env.GOOGLE_TOKEN_FILE = join(
+      tmpdir(),
+      "automator-missing-calendar-token.json",
+    );
+    const result = await calendarClient.insertEvent(input);
+    assert.deepEqual(result, {
+      ok: false,
+      certainty: "rejected",
+      code: "calendar_setup_failed",
+      message: "Google Calendar setup is unavailable",
+      retryable: false,
+    });
+    assert.equal(calls.clientOptions.length, 0);
+    assert.equal(calls.insertRequests.length, 0);
+  });
+});
+
+test("Calendar client setup failure rejects before any insert", async () => {
+  await withCalendarApi({}, async (calls) => {
+    google.calendar = (() => {
+      throw new Error("private-client-setup-detail");
+    }) as typeof google.calendar;
+    const result = await calendarClient.insertEvent(input);
+    assert.deepEqual(result, {
+      ok: false,
+      certainty: "rejected",
+      code: "calendar_setup_failed",
+      message: "Google Calendar setup is unavailable",
+      retryable: false,
+    });
+    assert.equal(calls.insertRequests.length, 0);
+    assert.equal(JSON.stringify(result).includes("private"), false);
+  });
+});
+
 test("confirmed client and authorization rejections are safe and definite", async () => {
   for (const status of [400, 401, 403, 404]) {
     await withCalendarInsert(

@@ -57,11 +57,23 @@ function sameInstant(
 
 export const calendarClient: CalendarClient & CalendarLookupClient = {
   async insertEvent(input) {
+    let calendar: ReturnType<typeof google.calendar>;
     try {
-      const calendar = google.calendar({
+      calendar = google.calendar({
         version: "v3",
         auth: await getGoogleAuth(),
       });
+    } catch {
+      return {
+        ok: false,
+        certainty: "rejected",
+        code: "calendar_setup_failed",
+        message: "Google Calendar setup is unavailable",
+        retryable: false,
+      };
+    }
+
+    try {
       const response = await calendar.events.insert(
         {
           calendarId: input.calendarId,

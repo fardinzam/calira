@@ -43,7 +43,13 @@ export const gmailClient: GmailClient = {
         .build();
       raw = mime.toString("base64url");
     } catch {
-      throw new Error("Gmail message could not be prepared");
+      return {
+        ok: false,
+        certainty: "rejected",
+        code: "gmail_message_preparation_failed",
+        message: "Gmail message could not be prepared",
+        retryable: false,
+      };
     }
 
     let api: ReturnType<typeof google.gmail>;

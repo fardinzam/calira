@@ -249,6 +249,30 @@ test("rejects failed Google authorization setup before any send attempt", async 
   assert.equal(calls, 0);
 });
 
+test("rejects message preparation failure before any send attempt", async () => {
+  let calls = 0;
+  await withGmailApi(
+    async () => {
+      calls++;
+      return { data: { id: "unexpected" } };
+    },
+    async () => {
+      const malformed = { ...message, body: Symbol("private-body") };
+      const result = await gmailClient.sendMessage(
+        malformed as unknown as GmailMessageInput,
+      );
+      assert.deepEqual(result, {
+        ok: false,
+        certainty: "rejected",
+        code: "gmail_message_preparation_failed",
+        message: "Gmail message could not be prepared",
+        retryable: false,
+      });
+    },
+  );
+  assert.equal(calls, 0);
+});
+
 test("rejects header injection and non-single email addresses before an API call", async () => {
   let calls = 0;
   await withGmailApi(
