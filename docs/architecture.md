@@ -94,7 +94,7 @@ The server and worker use the same authorized account and refresh access tokens 
 
 ## Retry policy
 
-- Retry bounded, clearly rejected transient requests such as rate-limit responses using backoff. Persist the next attempt time rather than sleeping inside a web request. Exact attempt count and backoff schedule are **Open**.
+- Retry only definitely rejected rate-limit responses, at most three total action attempts with 1-minute and 5-minute delays. Persist the next attempt time rather than sleeping inside a web request. The [Milestone 04 plan](plans/04-milestone.md) defines the recovery transitions.
 - Do not automatically retry validation errors, missing permissions, or revoked authorization. Show the error and required correction.
 - For Calendar, reconcile by stable event ID after ambiguous outcomes before any retry.
 - For Gmail, do not automatically retry an ambiguous send. A manual retry requires a warning. A definite rejected send may be retried without repeating Calendar.
@@ -105,5 +105,5 @@ The server and worker use the same authorized account and refresh access tokens 
 - **Open:** Exact polling interval, hosting, and process supervision.
 - **Decided for the reference flow:** Six Form questions: short-answer name/email, multiple-choice request type, Date with year, Time, and optional paragraph notes. Their separate date/time answers are `YYYY-MM-DD` and `HH:mm`, in `America/Los_Angeles`, with a 60-minute event. The exact question IDs come from the new owner-controlled Form during setup.
 - **Decided:** Disabling pauses queued work; already running work finishes. Milestone 01 runs without a configuration snapshot remain detection history and are not eligible for action execution.
-- **Open:** Exact retry attempt count/backoff. The reference Gmail message-construction approach is decided in the [decision log](./decisions.md).
+- **Decided for Milestone 04:** Three total automatic action attempts with 1-minute and 5-minute delays; unresolved Calendar inserts stop for review, and uncertain Gmail sends require an explicit duplicate-risk acknowledgment before a manual Gmail-only retry. The [decision log](./decisions.md) records the reasons.
 - **Open:** Post-MVP app auth provider, multi-user token storage, and public OAuth verification/deployment approach.

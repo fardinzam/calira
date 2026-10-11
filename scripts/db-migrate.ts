@@ -43,6 +43,7 @@ async function main() {
       "001_init",
       "002_workflow_config",
       "003_run_execution",
+      "004_recovery",
     ]) {
       if (versions.has(version)) continue;
       const path = `db/${version}.sql`;

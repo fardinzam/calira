@@ -2,7 +2,14 @@ export type ActionResult<T> =
   | { ok: true; value: T }
   | {
       ok: false;
-      certainty: "rejected" | "unknown";
+      certainty: "rejected";
+      code: string;
+      message: string;
+      retryable?: boolean;
+    }
+  | {
+      ok: false;
+      certainty: "unknown";
       code: string;
       message: string;
     };
@@ -30,6 +37,16 @@ export type CalendarClient = {
   ): Promise<ActionResult<{ eventId: string }>>;
 };
 
+export type CalendarLookupResult =
+  | { kind: "found_match"; eventId: string }
+  | { kind: "found_mismatch" }
+  | { kind: "not_found" }
+  | { kind: "unavailable"; code: string; message: string; retryable: boolean };
+
+export type CalendarLookupClient = {
+  lookupEvent(input: CalendarEventInput): Promise<CalendarLookupResult>;
+};
+
 export type GmailClient = {
   sendMessage(
     input: GmailMessageInput,
@@ -48,12 +65,15 @@ export type RunDetail = {
     | "failed"
     | "partially_failed";
   detectionOnly: boolean;
+  workflowEnabled: boolean;
+  gmailRetry: "none" | "definite" | "uncertain";
   error: { code: string; message: string } | null;
   steps: Array<{
     name: "filter" | "calendar" | "gmail";
     state:
       "pending" | "running" | "succeeded" | "skipped" | "failed" | "uncertain";
     attemptCount: number;
+    nextAttemptAt: Date | null;
     startedAt: Date | null;
     finishedAt: Date | null;
     summary: string | null;
@@ -401,11 +421,13 @@ type DetailRow = {
   last_submitted_time: Date;
   run_state: RunDetail["state"];
   detection_only: boolean;
+  workflow_enabled: boolean;
   run_error_code: string | null;
   run_error_message: string | null;
   step_name: RunDetail["steps"][number]["name"] | null;
   step_state: RunDetail["steps"][number]["state"] | null;
   attempt_count: number | null;
+  next_attempt_at: Date | null;
   step_started_at: Date | null;
   step_finished_at: Date | null;
   result_summary: string | null;
@@ -421,12 +443,14 @@ export async function getRunDetail(
   const result = await db.query<DetailRow>(
     `SELECT r.id, r.response_id, r.last_submitted_time, r.state AS run_state,
             r.config_snapshot IS NULL AS detection_only,
+            w.enabled AS workflow_enabled,
             r.error_code AS run_error_code, r.error_message AS run_error_message,
-            s.step_name, s.state AS step_state, s.attempt_count,
+            s.step_name, s.state AS step_state, s.attempt_count, s.next_attempt_at,
             s.started_at AS step_started_at, s.finished_at AS step_finished_at,
             s.result_summary, s.external_id,
             s.error_code AS step_error_code, s.error_message AS step_error_message
-     FROM run r LEFT JOIN step_run s ON s.run_id = r.id
+     FROM run r JOIN workflow w ON w.id = r.workflow_id
+     LEFT JOIN step_run s ON s.run_id = r.id
      WHERE r.id = $1
      ORDER BY CASE s.step_name WHEN 'filter' THEN 1 WHEN 'calendar' THEN 2 WHEN 'gmail' THEN 3 END`,
     [runId],
@@ -441,6 +465,7 @@ export async function getRunDetail(
           name: row.step_name!,
           state: row.step_state!,
           attemptCount: row.attempt_count!,
+          nextAttemptAt: row.next_attempt_at,
           startedAt: row.step_started_at,
           finishedAt: row.step_finished_at,
           summary: row.result_summary,
@@ -456,6 +481,7 @@ export async function getRunDetail(
         name,
         state: "pending" as const,
         attemptCount: 0,
+        nextAttemptAt: null,
         startedAt: null,
         finishedAt: null,
         summary: null,
@@ -464,12 +490,26 @@ export async function getRunDetail(
       })),
     );
   }
+  const calendar = steps.find((step) => step.name === "calendar");
+  const gmail = steps.find((step) => step.name === "gmail");
+  const gmailRetry =
+    !first.detection_only &&
+    first.run_state === "partially_failed" &&
+    calendar?.state === "succeeded" &&
+    calendar.externalId &&
+    (gmail?.state === "failed" || gmail?.state === "uncertain")
+      ? gmail.state === "uncertain"
+        ? "uncertain"
+        : "definite"
+      : "none";
   return {
     id: first.id,
     responseId: first.response_id,
     submittedAt: first.last_submitted_time,
     state: first.run_state,
     detectionOnly: first.detection_only,
+    workflowEnabled: first.workflow_enabled,
+    gmailRetry,
     error:
       first.run_error_code && first.run_error_message
         ? { code: first.run_error_code, message: first.run_error_message }

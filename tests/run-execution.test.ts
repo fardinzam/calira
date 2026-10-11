@@ -36,6 +36,7 @@ async function withSchema(body: (db: Pool) => Promise<void>) {
       "001_init",
       "002_workflow_config",
       "003_run_execution",
+      "004_recovery",
     ]) {
       await db.query(await readFile(`db/${file}.sql`, "utf8"));
     }
@@ -142,6 +143,7 @@ test("filter and validation failures stop before action and preserve safe detail
     await markFilteredOut(filtered.runId, db);
     const filteredDetail = await getRunDetail(filtered.runId, db);
     assert.equal(filteredDetail?.state, "filtered_out");
+    assert.equal(filteredDetail?.gmailRetry, "none");
     assert.deepEqual(
       filteredDetail?.steps.map((step) => step.state),
       ["succeeded", "skipped", "skipped"],
@@ -177,6 +179,7 @@ test("filter and validation failures stop before action and preserve safe detail
       ["succeeded", "skipped", "skipped"],
     );
     assert.equal(detail?.error?.code, "invalid_response");
+    assert.equal(detail?.gmailRetry, "none");
     assert.doesNotMatch(JSON.stringify(detail), /private-answer/);
   });
 });
@@ -236,6 +239,7 @@ test("confirmed Calendar and Gmail boundaries retain IDs and distinguish definit
     );
     assert.equal(partial?.steps[1].externalId, goodEventId);
     assert.ok(partial?.steps[1].finishedAt);
+    assert.equal(partial?.gmailRetry, "definite");
 
     const success = await fixtureRun(db);
     await claimNextRun(db);
@@ -252,6 +256,7 @@ test("confirmed Calendar and Gmail boundaries retain IDs and distinguish definit
     );
     assert.equal(done?.steps[2].externalId, "message-1");
     assert.ok(done?.steps.every((step) => step.finishedAt));
+    assert.equal(done?.gmailRetry, "none");
     await assert.rejects(startCalendar(success.runId, db));
   });
 });
@@ -269,8 +274,63 @@ test("queued snapshot detail synthesizes pending steps and legacy detail has non
       detail?.steps.map((step) => step.state),
       ["pending", "pending", "pending"],
     );
+    assert.equal(detail?.workflowEnabled, true);
+    assert.equal(detail?.gmailRetry, "none");
+    assert.ok(detail?.steps.every((step) => step.nextAttemptAt === null));
     assert.equal((await getRunDetail(legacy.runId, db))?.steps.length, 0);
+    assert.equal((await getRunDetail(legacy.runId, db))?.gmailRetry, "none");
     assert.doesNotMatch(JSON.stringify(detail), /private-answer/);
     assert.equal(await getRunDetail(randomUUID(), db), null);
+  });
+});
+
+test("detail exposes due time and safe retry eligibility from persisted states", async () => {
+  await withSchema(async (db) => {
+    const { runId, workflowId } = await fixtureRun(db, { enabled: false });
+    const due = new Date("2026-10-09T12:00:00Z");
+    await db.query("UPDATE run SET state = 'partially_failed' WHERE id = $1", [
+      runId,
+    ]);
+    await db.query(
+      `INSERT INTO step_run (run_id, step_name, state, external_id, next_attempt_at)
+       VALUES ($1, 'filter', 'succeeded', NULL, NULL),
+              ($1, 'calendar', 'succeeded', 'reserved-event-id', NULL),
+              ($1, 'gmail', 'failed', NULL, $2)`,
+      [runId, due],
+    );
+    let detail = await getRunDetail(runId, db);
+    assert.equal(detail?.workflowEnabled, false);
+    assert.equal(detail?.gmailRetry, "definite");
+    assert.equal(
+      detail?.steps[2].nextAttemptAt?.toISOString(),
+      due.toISOString(),
+    );
+    assert.doesNotMatch(JSON.stringify(detail), /private-answer/);
+
+    await db.query(
+      "UPDATE step_run SET state = 'uncertain' WHERE run_id = $1 AND step_name = 'gmail'",
+      [runId],
+    );
+    detail = await getRunDetail(runId, db);
+    assert.equal(detail?.gmailRetry, "uncertain");
+
+    await db.query("UPDATE run SET state = 'queued' WHERE id = $1", [runId]);
+    assert.equal((await getRunDetail(runId, db))?.gmailRetry, "none");
+    await db.query("UPDATE run SET state = 'running' WHERE id = $1", [runId]);
+    assert.equal((await getRunDetail(runId, db))?.gmailRetry, "none");
+    await db.query("UPDATE run SET state = 'succeeded' WHERE id = $1", [runId]);
+    assert.equal((await getRunDetail(runId, db))?.gmailRetry, "none");
+    await db.query("UPDATE run SET state = 'partially_failed' WHERE id = $1", [
+      runId,
+    ]);
+    await db.query(
+      "UPDATE step_run SET state = 'uncertain' WHERE run_id = $1 AND step_name = 'calendar'",
+      [runId],
+    );
+    assert.equal((await getRunDetail(runId, db))?.gmailRetry, "none");
+    await db.query("UPDATE workflow SET enabled = true WHERE id = $1", [
+      workflowId,
+    ]);
+    assert.equal((await getRunDetail(runId, db))?.workflowEnabled, true);
   });
 });
