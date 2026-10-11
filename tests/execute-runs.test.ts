@@ -37,6 +37,7 @@ async function withSchema(body: (db: Pool) => Promise<void>) {
       "002_workflow_config",
       "003_run_execution",
       "004_recovery",
+      "005_gmail_uncertainty",
     ]) {
       await db.query(await readFile(`db/${file}.sql`, "utf8"));
     }

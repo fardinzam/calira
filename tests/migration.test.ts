@@ -41,7 +41,13 @@ test("migrates an empty schema and reruns without replaying migrations", async (
     );
     assert.deepEqual(
       first.rows.map((row) => row.version),
-      ["001_init", "002_workflow_config", "003_run_execution", "004_recovery"],
+      [
+        "001_init",
+        "002_workflow_config",
+        "003_run_execution",
+        "004_recovery",
+        "005_gmail_uncertainty",
+      ],
     );
     const columns = await db.query<{ column_name: string }>(
       "SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'run'",
@@ -69,12 +75,13 @@ test("migrates an empty schema and reruns without replaying migrations", async (
       "next_attempt_at",
       "retry_mode",
       "lookup_attempt_count",
+      "uncertain_send_seen",
     ]) {
       assert.ok(stepColumns.rows.some((row) => row.column_name === name));
     }
     await migrate(url);
     const second = await db.query("SELECT version FROM schema_migration");
-    assert.equal(second.rowCount, 4);
+    assert.equal(second.rowCount, 5);
   });
 });
 
@@ -163,7 +170,7 @@ test("upgrades populated Milestone 02 runs without changing snapshot, answers, o
     await migrate(url);
     assert.equal(
       (await db.query("SELECT version FROM schema_migration")).rowCount,
-      4,
+      5,
     );
   });
 });
@@ -204,7 +211,7 @@ test("upgrades populated Milestone 03 runs without changing history or cursor", 
       `INSERT INTO step_run (run_id, step_name, state, attempt_count, external_id, started_at, finished_at)
        VALUES ($1, 'filter', 'succeeded', 1, NULL, now(), now()),
               ($1, 'calendar', 'succeeded', 1, 'reserved-event-id', now(), now()),
-              ($1, 'gmail', 'failed', 1, NULL, now(), now())`,
+              ($1, 'gmail', 'uncertain', 1, NULL, now(), now())`,
       [partial.id],
     );
     const before = await db.query(
@@ -222,6 +229,11 @@ test("upgrades populated Milestone 03 runs without changing history or cursor", 
     );
     assert.deepEqual(after.rows, before.rows);
     assert.deepEqual(afterSteps.rows, beforeSteps.rows);
+    const uncertainHistory = await db.query<{ uncertain_send_seen: boolean }>(
+      "SELECT uncertain_send_seen FROM step_run WHERE run_id = $1 AND step_name = 'gmail'",
+      [partial.id],
+    );
+    assert.equal(uncertainHistory.rows[0].uncertain_send_seen, true);
     assert.equal(
       (
         await db.query(
@@ -263,7 +275,7 @@ test("upgrades populated Milestone 03 runs without changing history or cursor", 
     await migrate(url);
     assert.equal(
       (await db.query("SELECT version FROM schema_migration")).rowCount,
-      4,
+      5,
     );
   });
 });

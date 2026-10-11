@@ -676,7 +676,8 @@ export async function markGmailUncertain(
     requireUpdated(
       (
         await client.query(
-          `UPDATE step_run SET state = 'uncertain', finished_at = now(), next_attempt_at = NULL,
+          `UPDATE step_run SET state = 'uncertain', uncertain_send_seen = true,
+           finished_at = now(), next_attempt_at = NULL,
            error_code = 'gmail_outcome_unknown', error_message = 'Message may have been sent'
            WHERE run_id = $1 AND step_name = 'gmail' AND state = 'running'
              AND EXISTS (SELECT 1 FROM step_run WHERE run_id = $1 AND step_name = 'calendar' AND state = 'succeeded')`,
@@ -691,6 +692,72 @@ export async function markGmailUncertain(
        WHERE id = $1`,
       [runId],
     );
+  });
+}
+
+export async function requestGmailRetry(
+  runId: string,
+  acknowledgeDuplicateRisk: boolean,
+  db: Pool = getDb(),
+): Promise<"queued" | "not_allowed" | "warning_required"> {
+  return transaction(db, async (client) => {
+    const run = await client.query(
+      `SELECT id FROM run WHERE id = $1 AND state = 'partially_failed'
+       AND config_snapshot IS NOT NULL FOR UPDATE`,
+      [runId],
+    );
+    if (!run.rows[0]) return "not_allowed";
+    const steps = await client.query<{
+      step_name: string;
+      state: string;
+      external_id: string | null;
+      uncertain_send_seen: boolean;
+    }>(
+      `SELECT step_name, state, external_id, uncertain_send_seen FROM step_run
+       WHERE run_id = $1 AND step_name IN ('calendar', 'gmail')
+       ORDER BY step_name FOR UPDATE`,
+      [runId],
+    );
+    const calendar = steps.rows.find((step) => step.step_name === "calendar");
+    const gmail = steps.rows.find((step) => step.step_name === "gmail");
+    if (
+      calendar?.state !== "succeeded" ||
+      !calendar.external_id ||
+      (gmail?.state !== "failed" && gmail?.state !== "uncertain") ||
+      gmail.external_id !== null
+    ) {
+      return "not_allowed";
+    }
+    if (
+      (gmail.state === "uncertain" || gmail.uncertain_send_seen) &&
+      acknowledgeDuplicateRisk !== true
+    ) {
+      return "warning_required";
+    }
+    requireUpdated(
+      (
+        await client.query(
+          `UPDATE step_run SET state = 'pending', retry_mode = 'manual',
+           next_attempt_at = now(), finished_at = NULL,
+           error_code = NULL, error_message = NULL
+           WHERE run_id = $1 AND step_name = 'gmail' AND state IN ('failed', 'uncertain')`,
+          [runId],
+        )
+      ).rowCount,
+      "manual Gmail retry",
+    );
+    requireUpdated(
+      (
+        await client.query(
+          `UPDATE run SET state = 'queued', finished_at = NULL,
+           error_code = NULL, error_message = NULL
+           WHERE id = $1 AND state = 'partially_failed'`,
+          [runId],
+        )
+      ).rowCount,
+      "manual Gmail queue",
+    );
+    return "queued";
   });
 }
 
@@ -755,6 +822,7 @@ type DetailRow = {
   external_id: string | null;
   step_error_code: string | null;
   step_error_message: string | null;
+  uncertain_send_seen: boolean | null;
 };
 
 export async function getRunDetail(
@@ -769,7 +837,8 @@ export async function getRunDetail(
             s.step_name, s.state AS step_state, s.attempt_count, s.next_attempt_at,
             s.started_at AS step_started_at, s.finished_at AS step_finished_at,
             s.result_summary, s.external_id,
-            s.error_code AS step_error_code, s.error_message AS step_error_message
+            s.error_code AS step_error_code, s.error_message AS step_error_message,
+            s.uncertain_send_seen
      FROM run r JOIN workflow w ON w.id = r.workflow_id
      LEFT JOIN step_run s ON s.run_id = r.id
      WHERE r.id = $1
@@ -818,8 +887,10 @@ export async function getRunDetail(
     first.run_state === "partially_failed" &&
     calendar?.state === "succeeded" &&
     calendar.externalId &&
+    gmail?.externalId === null &&
     (gmail?.state === "failed" || gmail?.state === "uncertain")
-      ? gmail.state === "uncertain"
+      ? result.rows.find((row) => row.step_name === "gmail")
+          ?.uncertain_send_seen || gmail.state === "uncertain"
         ? "uncertain"
         : "definite"
       : "none";

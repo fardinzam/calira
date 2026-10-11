@@ -20,8 +20,10 @@ import {
   scheduleCalendarLookup,
   markCalendarUncertain,
   markGmailUncertain,
+  markGmailPreflightFailed,
   startCalendarLookup,
   withWorkerLock,
+  requestGmailRetry,
 } from "../src/lib/run-execution";
 import { setWorkflowEnabled } from "../src/lib/workflows";
 import { config, metadata } from "./workflow-fixtures";
@@ -44,6 +46,7 @@ async function withSchema(body: (db: Pool) => Promise<void>) {
       "002_workflow_config",
       "003_run_execution",
       "004_recovery",
+      "005_gmail_uncertainty",
     ]) {
       await db.query(await readFile(`db/${file}.sql`, "utf8"));
     }
@@ -268,6 +271,181 @@ test("confirmed Calendar and Gmail boundaries retain IDs and distinguish definit
   });
 });
 
+test("manual Gmail retry queues only Gmail, preserves Calendar and attempts, and is single-request", async () => {
+  await withSchema(async (db) => {
+    const { runId } = await fixtureRun(db);
+    await claimNextRun(db);
+    await markFilterMatched(runId, db);
+    const eventId = await startCalendar(runId, db);
+    await finishCalendarSucceeded(runId, eventId, db);
+    await startGmail(runId, db);
+    await finishGmailRejected(runId, "gmail_denied", "Gmail rejected", db);
+    const calendarBefore = await db.query(
+      "SELECT * FROM step_run WHERE run_id = $1 AND step_name = 'calendar'",
+      [runId],
+    );
+
+    assert.deepEqual(
+      await Promise.all([
+        requestGmailRetry(runId, false, db),
+        requestGmailRetry(runId, false, db),
+      ]).then((results) => results.sort()),
+      ["not_allowed", "queued"],
+    );
+    assert.equal(await requestGmailRetry(runId, true, db), "not_allowed");
+    const queued = await getRunDetail(runId, db);
+    assert.equal(queued?.state, "queued");
+    assert.equal(queued?.gmailRetry, "none");
+    assert.equal(queued?.error, null);
+    assert.equal(queued?.steps[1].externalId, eventId);
+    assert.equal(queued?.steps[2].state, "pending");
+    assert.equal(queued?.steps[2].attemptCount, 1);
+    assert.equal(queued?.steps[2].error, null);
+    assert.deepEqual(
+      (
+        await db.query(
+          "SELECT * FROM step_run WHERE run_id = $1 AND step_name = 'calendar'",
+          [runId],
+        )
+      ).rows[0],
+      calendarBefore.rows[0],
+    );
+    const retry = await db.query<{ retry_mode: string }>(
+      "SELECT retry_mode FROM step_run WHERE run_id = $1 AND step_name = 'gmail'",
+      [runId],
+    );
+    assert.equal(retry.rows[0].retry_mode, "manual");
+    assert.equal((await claimNextRun(db))?.id, runId);
+    assert.equal(await requestGmailRetry(runId, false, db), "not_allowed");
+  });
+});
+
+test("uncertain Gmail requires a fresh duplicate-risk acknowledgment for every manual request", async () => {
+  await withSchema(async (db) => {
+    const { runId } = await fixtureRun(db);
+    await claimNextRun(db);
+    await markFilterMatched(runId, db);
+    const eventId = await startCalendar(runId, db);
+    await finishCalendarSucceeded(runId, eventId, db);
+    await startGmail(runId, db);
+    await markGmailUncertain(runId, db);
+    const before = await getRunDetail(runId, db);
+    assert.equal(before?.gmailRetry, "uncertain");
+    await db.query(
+      "UPDATE step_run SET uncertain_send_seen = false WHERE run_id = $1 AND step_name = 'gmail'",
+      [runId],
+    );
+    assert.equal(await requestGmailRetry(runId, false, db), "warning_required");
+    assert.equal((await getRunDetail(runId, db))?.gmailRetry, "uncertain");
+    await db.query(
+      "UPDATE step_run SET uncertain_send_seen = true WHERE run_id = $1 AND step_name = 'gmail'",
+      [runId],
+    );
+    assert.deepEqual(await getRunDetail(runId, db), before);
+    assert.equal(await requestGmailRetry(runId, true, db), "queued");
+    assert.equal((await claimNextRun(db))?.id, runId);
+    await startGmail(runId, db);
+    await markGmailUncertain(runId, db);
+    assert.equal(await requestGmailRetry(runId, false, db), "warning_required");
+    assert.equal(await requestGmailRetry(runId, true, db), "queued");
+    assert.equal((await getRunDetail(runId, db))?.steps[2].attemptCount, 2);
+  });
+});
+
+test("prior uncertain Gmail send keeps warning after a later definite failure", async () => {
+  for (const failure of ["rejected", "preflight"] as const) {
+    await withSchema(async (db) => {
+      const { runId } = await fixtureRun(db);
+      await claimNextRun(db);
+      await markFilterMatched(runId, db);
+      const eventId = await startCalendar(runId, db);
+      await finishCalendarSucceeded(runId, eventId, db);
+      await startGmail(runId, db);
+      await markGmailUncertain(runId, db);
+      assert.equal(await requestGmailRetry(runId, true, db), "queued");
+      assert.equal((await claimNextRun(db))?.id, runId);
+      if (failure === "rejected") {
+        await startGmail(runId, db);
+        await finishGmailRejected(runId, "gmail_denied", "Rejected", db);
+      } else {
+        await markGmailPreflightFailed(runId, "gmail_setup", "Unavailable", db);
+      }
+      assert.equal((await getRunDetail(runId, db))?.gmailRetry, "uncertain");
+      assert.equal(
+        await requestGmailRetry(runId, false, db),
+        "warning_required",
+      );
+      assert.equal(await requestGmailRetry(runId, true, db), "queued");
+    });
+  }
+});
+
+test("manual Gmail retry rejects unsafe states and stays queued while disabled", async () => {
+  await withSchema(async (db) => {
+    const success = await fixtureRun(db);
+    await claimNextRun(db);
+    await markFilterMatched(success.runId, db);
+    const eventId = await startCalendar(success.runId, db);
+    await finishCalendarSucceeded(success.runId, eventId, db);
+    await startGmail(success.runId, db);
+    await finishGmailSucceeded(success.runId, "message-1", db);
+    assert.equal(
+      await requestGmailRetry(success.runId, true, db),
+      "not_allowed",
+    );
+
+    const failed = await fixtureRun(db);
+    await claimNextRun(db);
+    await markFilterMatched(failed.runId, db);
+    await startCalendar(failed.runId, db);
+    await finishCalendarRejected(failed.runId, "denied", "Rejected", db);
+    assert.equal(
+      await requestGmailRetry(failed.runId, true, db),
+      "not_allowed",
+    );
+
+    const unresolved = await fixtureRun(db);
+    await claimNextRun(db);
+    await markFilterMatched(unresolved.runId, db);
+    await startCalendar(unresolved.runId, db);
+    await markCalendarUncertain(unresolved.runId, "unknown", "Unknown", db);
+    assert.equal(
+      await requestGmailRetry(unresolved.runId, true, db),
+      "not_allowed",
+    );
+
+    const legacy = await fixtureRun(db, { snapshot: false });
+    assert.equal(
+      await requestGmailRetry(legacy.runId, true, db),
+      "not_allowed",
+    );
+    assert.equal(
+      await requestGmailRetry(randomUUID(), true, db),
+      "not_allowed",
+    );
+
+    const disabled = await fixtureRun(db);
+    await claimNextRun(db);
+    await markFilterMatched(disabled.runId, db);
+    const savedEventId = await startCalendar(disabled.runId, db);
+    await finishCalendarSucceeded(disabled.runId, savedEventId, db);
+    await startGmail(disabled.runId, db);
+    await finishGmailRejected(disabled.runId, "denied", "Rejected", db);
+    await setWorkflowEnabled(disabled.workflowId, false, new Date(), db);
+    assert.equal(await requestGmailRetry(disabled.runId, false, db), "queued");
+    assert.equal(await claimNextRun(db), null);
+    await setWorkflowEnabled(
+      disabled.workflowId,
+      true,
+      new Date(),
+      db,
+      metadata,
+    );
+    assert.equal((await claimNextRun(db))?.id, disabled.runId);
+    assert.equal(await claimNextRun(db), null);
+  });
+});
+
 test("queued snapshot detail synthesizes pending steps and legacy detail has none", async () => {
   await withSchema(async (db) => {
     const queued = await fixtureRun(db);
@@ -308,6 +486,15 @@ test("detail exposes due time and safe retry eligibility from persisted states",
     let detail = await getRunDetail(runId, db);
     assert.equal(detail?.workflowEnabled, false);
     assert.equal(detail?.gmailRetry, "definite");
+    await db.query(
+      "UPDATE step_run SET external_id = 'confirmed-message' WHERE run_id = $1 AND step_name = 'gmail'",
+      [runId],
+    );
+    assert.equal((await getRunDetail(runId, db))?.gmailRetry, "none");
+    await db.query(
+      "UPDATE step_run SET external_id = NULL WHERE run_id = $1 AND step_name = 'gmail'",
+      [runId],
+    );
     assert.equal(
       detail?.steps[2].nextAttemptAt?.toISOString(),
       due.toISOString(),

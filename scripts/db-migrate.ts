@@ -44,6 +44,7 @@ async function main() {
       "002_workflow_config",
       "003_run_execution",
       "004_recovery",
+      "005_gmail_uncertainty",
     ]) {
       if (versions.has(version)) continue;
       const path = `db/${version}.sql`;
