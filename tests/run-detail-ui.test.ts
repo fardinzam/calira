@@ -65,6 +65,7 @@ before(async () => {
     "001_init",
     "002_workflow_config",
     "003_run_execution",
+    "004_recovery",
   ]) {
     await db.query(await readFile(`db/${migration}.sql`, "utf8"));
   }

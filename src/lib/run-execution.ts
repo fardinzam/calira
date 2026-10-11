@@ -139,6 +139,16 @@ export async function claimNextRun(
              SELECT 1 FROM step_run s WHERE s.run_id = r.id
                AND s.state = 'pending' AND s.step_name IN ('calendar', 'gmail')
                AND (s.next_attempt_at IS NULL OR s.next_attempt_at <= $1)
+               AND (
+                 (s.step_name = 'calendar' AND EXISTS (
+                   SELECT 1 FROM step_run f WHERE f.run_id = r.id
+                     AND f.step_name = 'filter' AND f.state = 'succeeded'
+                 ))
+                 OR (s.step_name = 'gmail' AND EXISTS (
+                   SELECT 1 FROM step_run c WHERE c.run_id = r.id
+                     AND c.step_name = 'calendar' AND c.state = 'succeeded'
+                 ))
+               )
            )
          )
        ORDER BY r.created_at, r.id LIMIT 1
@@ -168,6 +178,25 @@ export async function claimNextRun(
       snapshot: row.config_snapshot,
     };
   });
+}
+
+export async function listRunningRuns(
+  db: Pool = getDb(),
+): Promise<ClaimedRun[]> {
+  const result = await db.query<{
+    id: string;
+    answers_json: Record<string, unknown>;
+    config_snapshot: unknown;
+  }>(
+    `SELECT id, answers_json, config_snapshot FROM run
+     WHERE state = 'running' AND config_snapshot IS NOT NULL
+     ORDER BY created_at, id`,
+  );
+  return result.rows.map((row) => ({
+    id: row.id,
+    answers: row.answers_json,
+    snapshot: row.config_snapshot,
+  }));
 }
 
 async function skipActions(client: PoolClient, runId: string): Promise<void> {
@@ -239,17 +268,25 @@ export async function markValidationFailed(
 ): Promise<void> {
   await transaction(db, async (client) => {
     await lockRunning(client, runId);
-    requireUpdated(
-      (
-        await client.query(
-          `UPDATE step_run SET state = 'succeeded', attempt_count = 1,
-         started_at = now(), finished_at = now(), result_summary = 'Filter matched'
-         WHERE run_id = $1 AND step_name = 'filter' AND state = 'pending'`,
-          [runId],
-        )
-      ).rowCount,
-      "filter",
+    const filter = await client.query<{ state: string }>(
+      "SELECT state FROM step_run WHERE run_id = $1 AND step_name = 'filter' FOR UPDATE",
+      [runId],
     );
+    if (filter.rows[0]?.state === "pending") {
+      requireUpdated(
+        (
+          await client.query(
+            `UPDATE step_run SET state = 'succeeded', attempt_count = 1,
+             started_at = now(), finished_at = now(), result_summary = 'Filter matched'
+             WHERE run_id = $1 AND step_name = 'filter' AND state = 'pending'`,
+            [runId],
+          )
+        ).rowCount,
+        "filter",
+      );
+    } else if (filter.rows[0]?.state !== "succeeded") {
+      throw new Error("Invalid validation failure transition");
+    }
     await skipActions(client, runId);
     await client.query(
       "UPDATE run SET state = 'failed', finished_at = now(), error_code = $2, error_message = $3 WHERE id = $1",
@@ -336,7 +373,7 @@ export async function finishCalendarRejected(
       (
         await client.query(
           `UPDATE step_run SET state = 'failed', finished_at = now(), error_code = $2, error_message = $3
-         WHERE run_id = $1 AND step_name = 'calendar' AND state = 'running'`,
+         WHERE run_id = $1 AND step_name = 'calendar' AND state IN ('running', 'pending')`,
           [runId, code, message],
         )
       ).rowCount,
@@ -430,6 +467,35 @@ export async function finishGmailRejected(
   });
 }
 
+export async function markGmailPreflightFailed(
+  runId: string,
+  code: string,
+  message: string,
+  db: Pool = getDb(),
+): Promise<void> {
+  await transaction(db, async (client) => {
+    await lockRunning(client, runId);
+    requireUpdated(
+      (
+        await client.query(
+          `UPDATE step_run SET state = 'failed', finished_at = now(),
+           next_attempt_at = NULL, error_code = $2, error_message = $3
+           WHERE run_id = $1 AND step_name = 'gmail' AND state = 'pending'
+             AND EXISTS (SELECT 1 FROM step_run WHERE run_id = $1
+               AND step_name = 'calendar' AND state = 'succeeded')`,
+          [runId, code, message],
+        )
+      ).rowCount,
+      "Gmail preflight failure",
+    );
+    await client.query(
+      `UPDATE run SET state = 'partially_failed', finished_at = now(),
+       error_code = $2, error_message = $3 WHERE id = $1`,
+      [runId, code, message],
+    );
+  });
+}
+
 function retryDelayMs(count: number): number {
   return count === 1 ? 60_000 : 300_000;
 }
@@ -517,7 +583,15 @@ export async function startCalendarLookup(
        RETURNING lookup_attempt_count`,
       [runId, now],
     );
-    if (!result.rows[0]) throw new Error("Invalid Calendar lookup transition");
+    if (!result.rows[0]) {
+      const exhausted = await client.query<{ lookup_attempt_count: number }>(
+        `SELECT lookup_attempt_count FROM step_run WHERE run_id = $1
+         AND step_name = 'calendar' AND state IN ('pending', 'running')`,
+        [runId],
+      );
+      if (exhausted.rows[0]?.lookup_attempt_count >= 3) return 0;
+      throw new Error("Invalid Calendar lookup transition");
+    }
     return result.rows[0].lookup_attempt_count;
   });
 }

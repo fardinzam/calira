@@ -5,15 +5,29 @@ import { getGoogleAuth } from "../lib/google/auth";
 import { calendarClient } from "../lib/google/calendar";
 import { listFormResponses } from "../lib/google/forms";
 import { gmailClient } from "../lib/google/gmail";
-import { executePendingRuns } from "./execute-runs";
+import { drainQueuedRuns, recoverRunningRuns } from "./execute-runs";
 import { pollEnabledWorkflows } from "./poll-forms";
 
 async function pollOnce() {
   return withWorkerLock(getDb(), async (assertActive) => {
     await assertActive();
-    const failure = await pollEnabledWorkflows({ listFormResponses }, getDb());
+    await recoverRunningRuns(calendarClient, gmailClient, getDb(), undefined, {
+      assertActive,
+    });
     await assertActive();
-    await executePendingRuns(calendarClient, gmailClient, getDb());
+    const failure = await pollEnabledWorkflows(
+      {
+        async listFormResponses(formId, since, pageToken) {
+          await assertActive();
+          return listFormResponses(formId, since, pageToken);
+        },
+      },
+      getDb(),
+    );
+    await assertActive();
+    await drainQueuedRuns(calendarClient, gmailClient, getDb(), undefined, {
+      assertActive,
+    });
     return failure;
   });
 }
