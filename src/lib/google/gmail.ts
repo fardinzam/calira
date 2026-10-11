@@ -46,8 +46,20 @@ export const gmailClient: GmailClient = {
       throw new Error("Gmail message could not be prepared");
     }
 
+    let api: ReturnType<typeof google.gmail>;
     try {
-      const api = google.gmail({ version: "v1", auth: await getGoogleAuth() });
+      api = google.gmail({ version: "v1", auth: await getGoogleAuth() });
+    } catch {
+      return {
+        ok: false,
+        certainty: "rejected",
+        code: "gmail_auth_unavailable",
+        message: "Gmail authorization is unavailable",
+        retryable: false,
+      };
+    }
+
+    try {
       const response = await api.users.messages.send(
         { userId: "me", requestBody: { raw } },
         { retry: false },
@@ -63,14 +75,33 @@ export const gmailClient: GmailClient = {
       }
       return { ok: true, value: { messageId: id } };
     } catch (error) {
-      const status = (error as { response?: { status?: unknown } })?.response
-        ?.status;
-      if ([400, 401, 403, 404].includes(status as number)) {
+      const response = (
+        error as {
+          response?: {
+            status?: unknown;
+            data?: { error?: { errors?: unknown } };
+          };
+        }
+      )?.response;
+      const status = response?.status;
+      const reasons = response?.data?.error?.errors;
+      const rateLimitReason =
+        Array.isArray(reasons) &&
+        reasons.some(
+          (item: unknown) =>
+            item !== null &&
+            typeof item === "object" &&
+            "reason" in item &&
+            (item.reason === "rateLimitExceeded" ||
+              item.reason === "userRateLimitExceeded"),
+        );
+      if ([400, 401, 403, 404, 429].includes(status as number)) {
         return {
           ok: false,
           certainty: "rejected",
           code: "gmail_rejected",
           message: `Gmail send rejected (HTTP ${status})`,
+          retryable: status === 429 || (status === 403 && rateLimitReason),
         };
       }
       return {

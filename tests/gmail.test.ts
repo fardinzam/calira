@@ -113,11 +113,17 @@ test("classifies confirmed HTTP 400, 401, 403, and 404 rejections without leakin
       async () => {
         const result = await gmailClient.sendMessage(message);
         assert.equal(result.ok, false);
-        if (!result.ok) {
-          assert.equal(result.certainty, "rejected");
+        if (!result.ok && result.certainty === "rejected") {
+          assert.equal(result.retryable, false);
           assert.ok(result.code);
           assert.match(result.message, new RegExp(`HTTP ${status}`));
           assert.doesNotMatch(result.message, /private-response/);
+          assert.doesNotMatch(
+            result.message,
+            /requester@example|owner@example/,
+          );
+        } else {
+          assert.fail("Expected a definite Gmail rejection");
         }
       },
     );
@@ -125,9 +131,62 @@ test("classifies confirmed HTTP 400, 401, 403, and 404 rejections without leakin
   }
 });
 
+test("retries only definitely rejected Gmail rate-limit responses", async () => {
+  for (const { status, reason, retryable } of [
+    { status: 429, reason: undefined, retryable: true },
+    { status: 403, reason: "rateLimitExceeded", retryable: true },
+    { status: 403, reason: "userRateLimitExceeded", retryable: true },
+    { status: 403, reason: "dailyLimitExceeded", retryable: false },
+    { status: 403, reason: "domainPolicy", retryable: false },
+    { status: 403, reason: undefined, retryable: false },
+  ]) {
+    let calls = 0;
+    let options: SendOptions | undefined;
+    await withGmailApi(
+      async (_, sendOptions) => {
+        calls++;
+        options = sendOptions;
+        throw {
+          response: {
+            status,
+            data: {
+              error: {
+                errors: reason ? [{ reason, message: "private-response" }] : [],
+                message: "private-response",
+              },
+            },
+          },
+          message: "private-response requester@example.net",
+        };
+      },
+      async () => {
+        const result = await gmailClient.sendMessage(message);
+        assert.equal(result.ok, false);
+        if (!result.ok && result.certainty === "rejected") {
+          assert.equal(result.retryable, retryable);
+          assert.doesNotMatch(
+            result.message,
+            /private-response|requester@example|owner@example/,
+          );
+          assert.doesNotMatch(
+            result.code,
+            /private-response|requester@example|owner@example/,
+          );
+        } else {
+          assert.fail("Expected a definite Gmail rejection");
+        }
+      },
+    );
+    assert.equal(calls, 1);
+    assert.deepEqual(options, { retry: false });
+  }
+});
+
 test("classifies transport failures and HTTP 5xx as unknown without retrying", async () => {
   for (const failure of [
     new Error("private-transport-detail"),
+    { code: "ETIMEDOUT", message: "private-timeout-detail" },
+    { response: { status: 409, data: "private-response" } },
     { response: { status: 500, data: "private-response" } },
     { response: { status: 503, data: "private-response" } },
   ]) {
@@ -163,6 +222,31 @@ test("treats a success response without a message ID as unknown", async () => {
       }
     },
   );
+});
+
+test("rejects failed Google authorization setup before any send attempt", async () => {
+  let calls = 0;
+  await withGmailApi(
+    async () => {
+      calls++;
+      return { data: { id: "unexpected" } };
+    },
+    async () => {
+      process.env.GOOGLE_TOKEN_FILE = join(
+        process.env.GOOGLE_TOKEN_FILE!,
+        "missing",
+      );
+      const result = await gmailClient.sendMessage(message);
+      assert.deepEqual(result, {
+        ok: false,
+        certainty: "rejected",
+        code: "gmail_auth_unavailable",
+        message: "Gmail authorization is unavailable",
+        retryable: false,
+      });
+    },
+  );
+  assert.equal(calls, 0);
 });
 
 test("rejects header injection and non-single email addresses before an API call", async () => {
