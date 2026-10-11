@@ -1,5 +1,6 @@
 import { setTimeout } from "node:timers/promises";
 import { getDb } from "../lib/db";
+import { withWorkerLock } from "../lib/run-execution";
 import { getGoogleAuth } from "../lib/google/auth";
 import { calendarClient } from "../lib/google/calendar";
 import { listFormResponses } from "../lib/google/forms";
@@ -8,9 +9,13 @@ import { executePendingRuns } from "./execute-runs";
 import { pollEnabledWorkflows } from "./poll-forms";
 
 async function pollOnce() {
-  const failure = await pollEnabledWorkflows({ listFormResponses }, getDb());
-  await executePendingRuns(calendarClient, gmailClient, getDb());
-  return failure;
+  return withWorkerLock(getDb(), async (assertActive) => {
+    await assertActive();
+    const failure = await pollEnabledWorkflows({ listFormResponses }, getDb());
+    await assertActive();
+    await executePendingRuns(calendarClient, gmailClient, getDb());
+    return failure;
+  });
 }
 
 async function main() {

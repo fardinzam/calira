@@ -122,6 +122,7 @@ async function lockRunning(client: PoolClient, runId: string): Promise<void> {
 
 export async function claimNextRun(
   db: Pool = getDb(),
+  now: Date = new Date(),
 ): Promise<ClaimedRun | null> {
   return transaction(db, async (client) => {
     const result = await client.query<{
@@ -132,23 +133,33 @@ export async function claimNextRun(
       `SELECT r.id, r.answers_json, r.config_snapshot
        FROM run r JOIN workflow w ON w.id = r.workflow_id
        WHERE r.state = 'queued' AND r.config_snapshot IS NOT NULL AND w.enabled = true
+         AND (
+           NOT EXISTS (SELECT 1 FROM step_run s WHERE s.run_id = r.id)
+           OR EXISTS (
+             SELECT 1 FROM step_run s WHERE s.run_id = r.id
+               AND s.state = 'pending' AND s.step_name IN ('calendar', 'gmail')
+               AND (s.next_attempt_at IS NULL OR s.next_attempt_at <= $1)
+           )
+         )
        ORDER BY r.created_at, r.id LIMIT 1
        FOR UPDATE OF r, w SKIP LOCKED`,
+      [now],
     );
     const row = result.rows[0];
     if (!row) return null;
     requireUpdated(
       (
         await client.query(
-          "UPDATE run SET state = 'running', started_at = now() WHERE id = $1 AND state = 'queued'",
-          [row.id],
+          "UPDATE run SET state = 'running', started_at = COALESCE(started_at, $2), finished_at = NULL WHERE id = $1 AND state = 'queued'",
+          [row.id, now],
         )
       ).rowCount,
       "claim",
     );
     await client.query(
       `INSERT INTO step_run (run_id, step_name)
-       VALUES ($1, 'filter'), ($1, 'calendar'), ($1, 'gmail')`,
+       SELECT $1, names.step_name FROM unnest(ARRAY['filter', 'calendar', 'gmail']) AS names(step_name)
+       WHERE NOT EXISTS (SELECT 1 FROM step_run WHERE run_id = $1)`,
       [row.id],
     );
     return {
@@ -278,8 +289,10 @@ export async function startCalendar(
       (
         await client.query(
           `UPDATE step_run SET state = 'running', attempt_count = attempt_count + 1,
-         started_at = now(), external_id = $2
+         started_at = now(), finished_at = NULL, external_id = COALESCE(external_id, $2),
+         next_attempt_at = NULL, error_code = NULL, error_message = NULL
          WHERE run_id = $1 AND step_name = 'calendar' AND state = 'pending'
+         AND (external_id IS NULL OR external_id = $2)
          AND EXISTS (SELECT 1 FROM step_run WHERE run_id = $1 AND step_name = 'filter' AND state = 'succeeded')`,
           [runId, eventId],
         )
@@ -300,8 +313,9 @@ export async function finishCalendarSucceeded(
     requireUpdated(
       (
         await client.query(
-          `UPDATE step_run SET state = 'succeeded', finished_at = now(), result_summary = 'Event created'
-         WHERE run_id = $1 AND step_name = 'calendar' AND state = 'running' AND external_id = $2`,
+          `UPDATE step_run SET state = 'succeeded', finished_at = now(), result_summary = 'Event created',
+           next_attempt_at = NULL, error_code = NULL, error_message = NULL
+         WHERE run_id = $1 AND step_name = 'calendar' AND state IN ('running', 'pending') AND external_id = $2`,
           [runId, eventId],
         )
       ).rowCount,
@@ -354,7 +368,8 @@ export async function startGmail(
     requireUpdated(
       (
         await client.query(
-          `UPDATE step_run SET state = 'running', attempt_count = attempt_count + 1, started_at = now()
+          `UPDATE step_run SET state = 'running', attempt_count = attempt_count + 1, started_at = now(),
+           finished_at = NULL, next_attempt_at = NULL, error_code = NULL, error_message = NULL
          WHERE run_id = $1 AND step_name = 'gmail' AND state = 'pending'
          AND EXISTS (SELECT 1 FROM step_run WHERE run_id = $1 AND step_name = 'calendar' AND state = 'succeeded')`,
           [runId],
@@ -413,6 +428,238 @@ export async function finishGmailRejected(
       [runId, code, message],
     );
   });
+}
+
+function retryDelayMs(count: number): number {
+  return count === 1 ? 60_000 : 300_000;
+}
+
+async function scheduleRetry(
+  runId: string,
+  stepName: "calendar" | "gmail",
+  code: string,
+  message: string,
+  now: Date,
+  db: Pool,
+): Promise<boolean> {
+  return transaction(db, async (client) => {
+    await lockRunning(client, runId);
+    const step = await client.query<{
+      attempt_count: number;
+      retry_mode: string;
+    }>(
+      `SELECT attempt_count, retry_mode FROM step_run
+       WHERE run_id = $1 AND step_name = $2 AND state = 'running' FOR UPDATE`,
+      [runId, stepName],
+    );
+    if (!step.rows[0]) throw new Error(`Invalid ${stepName} retry transition`);
+    if (
+      step.rows[0].retry_mode !== "automatic" ||
+      step.rows[0].attempt_count >= 3
+    ) {
+      return false;
+    }
+    const due = new Date(
+      now.getTime() + retryDelayMs(step.rows[0].attempt_count),
+    );
+    requireUpdated(
+      (
+        await client.query(
+          `UPDATE step_run SET state = 'pending', next_attempt_at = $3,
+           error_code = $4, error_message = $5, finished_at = NULL
+           WHERE run_id = $1 AND step_name = $2 AND state = 'running'`,
+          [runId, stepName, due, code, message],
+        )
+      ).rowCount,
+      `${stepName} retry`,
+    );
+    await client.query(
+      "UPDATE run SET state = 'queued', finished_at = NULL, error_code = NULL, error_message = NULL WHERE id = $1",
+      [runId],
+    );
+    return true;
+  });
+}
+
+export function scheduleCalendarRetry(
+  runId: string,
+  code: string,
+  message: string,
+  now: Date = new Date(),
+  db: Pool = getDb(),
+): Promise<boolean> {
+  return scheduleRetry(runId, "calendar", code, message, now, db);
+}
+
+export function scheduleGmailRetry(
+  runId: string,
+  code: string,
+  message: string,
+  now: Date = new Date(),
+  db: Pool = getDb(),
+): Promise<boolean> {
+  return scheduleRetry(runId, "gmail", code, message, now, db);
+}
+
+export async function startCalendarLookup(
+  runId: string,
+  now: Date = new Date(),
+  db: Pool = getDb(),
+): Promise<number> {
+  return transaction(db, async (client) => {
+    await lockRunning(client, runId);
+    const result = await client.query<{ lookup_attempt_count: number }>(
+      `UPDATE step_run SET lookup_attempt_count = lookup_attempt_count + 1
+       WHERE run_id = $1 AND step_name = 'calendar'
+         AND state IN ('pending', 'running') AND external_id IS NOT NULL
+         AND lookup_attempt_count < 3
+         AND (next_attempt_at IS NULL OR next_attempt_at <= $2)
+       RETURNING lookup_attempt_count`,
+      [runId, now],
+    );
+    if (!result.rows[0]) throw new Error("Invalid Calendar lookup transition");
+    return result.rows[0].lookup_attempt_count;
+  });
+}
+
+export async function scheduleCalendarLookup(
+  runId: string,
+  code: string,
+  message: string,
+  now: Date = new Date(),
+  db: Pool = getDb(),
+): Promise<boolean> {
+  return transaction(db, async (client) => {
+    await lockRunning(client, runId);
+    const step = await client.query<{ lookup_attempt_count: number }>(
+      `SELECT lookup_attempt_count FROM step_run
+       WHERE run_id = $1 AND step_name = 'calendar' AND state IN ('pending', 'running') FOR UPDATE`,
+      [runId],
+    );
+    if (!step.rows[0] || step.rows[0].lookup_attempt_count < 1) {
+      throw new Error("Invalid Calendar lookup schedule");
+    }
+    if (step.rows[0].lookup_attempt_count >= 3) return false;
+    const due = new Date(
+      now.getTime() + retryDelayMs(step.rows[0].lookup_attempt_count),
+    );
+    requireUpdated(
+      (
+        await client.query(
+          `UPDATE step_run SET next_attempt_at = $2, error_code = $3, error_message = $4
+           WHERE run_id = $1 AND step_name = 'calendar' AND state IN ('pending', 'running')`,
+          [runId, due, code, message],
+        )
+      ).rowCount,
+      "Calendar lookup schedule",
+    );
+    return true;
+  });
+}
+
+export async function markCalendarUncertain(
+  runId: string,
+  code: string,
+  message: string,
+  db: Pool = getDb(),
+): Promise<void> {
+  await transaction(db, async (client) => {
+    await lockRunning(client, runId);
+    requireUpdated(
+      (
+        await client.query(
+          `UPDATE step_run SET state = 'uncertain', finished_at = now(), next_attempt_at = NULL,
+           error_code = $2, error_message = $3
+           WHERE run_id = $1 AND step_name = 'calendar' AND state IN ('pending', 'running')`,
+          [runId, code, message],
+        )
+      ).rowCount,
+      "Calendar uncertain",
+    );
+    requireUpdated(
+      (
+        await client.query(
+          `UPDATE step_run SET state = 'skipped', finished_at = now()
+           WHERE run_id = $1 AND step_name = 'gmail' AND state = 'pending'`,
+          [runId],
+        )
+      ).rowCount,
+      "Gmail skip",
+    );
+    await client.query(
+      "UPDATE run SET state = 'failed', finished_at = now(), error_code = $2, error_message = $3 WHERE id = $1",
+      [runId, code, message],
+    );
+  });
+}
+
+export async function markGmailUncertain(
+  runId: string,
+  db: Pool = getDb(),
+): Promise<void> {
+  await transaction(db, async (client) => {
+    await lockRunning(client, runId);
+    requireUpdated(
+      (
+        await client.query(
+          `UPDATE step_run SET state = 'uncertain', finished_at = now(), next_attempt_at = NULL,
+           error_code = 'gmail_outcome_unknown', error_message = 'Message may have been sent'
+           WHERE run_id = $1 AND step_name = 'gmail' AND state = 'running'
+             AND EXISTS (SELECT 1 FROM step_run WHERE run_id = $1 AND step_name = 'calendar' AND state = 'succeeded')`,
+          [runId],
+        )
+      ).rowCount,
+      "Gmail uncertain",
+    );
+    await client.query(
+      `UPDATE run SET state = 'partially_failed', finished_at = now(),
+       error_code = 'gmail_outcome_unknown', error_message = 'Message may have been sent'
+       WHERE id = $1`,
+      [runId],
+    );
+  });
+}
+
+export async function withWorkerLock<T>(
+  db: Pool,
+  work: (assertActive: () => Promise<void>) => Promise<T>,
+): Promise<T | null> {
+  const client = await db.connect();
+  let active = true;
+  let acquired = false;
+  const onError = () => {
+    active = false;
+  };
+  client.on("error", onError);
+  client.on("end", onError);
+  try {
+    const lock = await client.query<{ acquired: boolean }>(
+      "SELECT pg_try_advisory_lock(48274, 4) AS acquired",
+    );
+    if (!lock.rows[0].acquired) return null;
+    acquired = true;
+    const assertActive = async () => {
+      if (!active) throw new Error("Worker lock connection lost");
+      try {
+        await client.query("SELECT 1");
+      } catch {
+        active = false;
+        throw new Error("Worker lock connection lost");
+      }
+    };
+    const result = await work(assertActive);
+    await assertActive();
+    return result;
+  } finally {
+    client.off("error", onError);
+    client.off("end", onError);
+    if (active && acquired) {
+      await client.query("SELECT pg_advisory_unlock(48274, 4)").catch(() => {
+        active = false;
+      });
+    }
+    client.release(!active);
+  }
 }
 
 type DetailRow = {

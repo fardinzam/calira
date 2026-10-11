@@ -15,6 +15,13 @@ import {
   startGmail,
   finishGmailSucceeded,
   finishGmailRejected,
+  scheduleCalendarRetry,
+  scheduleGmailRetry,
+  scheduleCalendarLookup,
+  markCalendarUncertain,
+  markGmailUncertain,
+  startCalendarLookup,
+  withWorkerLock,
 } from "../src/lib/run-execution";
 import { setWorkflowEnabled } from "../src/lib/workflows";
 import { config, metadata } from "./workflow-fixtures";
@@ -332,5 +339,274 @@ test("detail exposes due time and safe retry eligibility from persisted states",
       workflowId,
     ]);
     assert.equal((await getRunDetail(runId, db))?.workflowEnabled, true);
+  });
+});
+
+test("due claims preserve step rows and confirmed IDs; disabled and legacy retries stay paused", async () => {
+  await withSchema(async (db) => {
+    const now = new Date("2026-10-10T12:00:00Z");
+    const { runId, workflowId } = await fixtureRun(db);
+    await claimNextRun(db);
+    await markFilterMatched(runId, db);
+    const eventId = await startCalendar(runId, db);
+    await finishCalendarSucceeded(runId, eventId, db);
+    await startGmail(runId, db);
+    assert.equal(
+      await scheduleGmailRetry(
+        runId,
+        "gmail_rate_limited",
+        "Gmail rate limited the request",
+        now,
+        db,
+      ),
+      true,
+    );
+    assert.equal(
+      await claimNextRun(db, new Date(now.getTime() + 59_000)),
+      null,
+    );
+    await setWorkflowEnabled(workflowId, false, new Date(), db);
+    assert.equal(
+      await claimNextRun(db, new Date(now.getTime() + 60_000)),
+      null,
+    );
+    await setWorkflowEnabled(workflowId, true, new Date(), db, metadata);
+    const [first, second] = await Promise.all([
+      claimNextRun(db, new Date(now.getTime() + 60_000)),
+      claimNextRun(db, new Date(now.getTime() + 60_000)),
+    ]);
+    assert.deepEqual([first?.id, second?.id].filter(Boolean), [runId]);
+    const detail = await getRunDetail(runId, db);
+    assert.equal(detail?.steps[1].state, "succeeded");
+    assert.equal(detail?.steps[1].externalId, eventId);
+    assert.equal(detail?.steps[2].state, "pending");
+    assert.equal(detail?.steps[2].attemptCount, 1);
+    assert.equal(detail?.steps.length, 3);
+    const legacy = await fixtureRun(db, { snapshot: false });
+    assert.equal(
+      await claimNextRun(db, new Date(now.getTime() + 60_000)),
+      null,
+    );
+    assert.equal((await getRunDetail(legacy.runId, db))?.detectionOnly, true);
+  });
+});
+
+test("retry schedules are bounded and manual mode never starts automatic retry", async () => {
+  await withSchema(async (db) => {
+    const now = new Date("2026-10-10T12:00:00Z");
+    const gmail = await fixtureRun(db);
+    await claimNextRun(db);
+    await markFilterMatched(gmail.runId, db);
+    const eventId = await startCalendar(gmail.runId, db);
+    await finishCalendarSucceeded(gmail.runId, eventId, db);
+    await startGmail(gmail.runId, db);
+    assert.equal(
+      await scheduleGmailRetry(gmail.runId, "rate", "Rate limited", now, db),
+      true,
+    );
+    assert.equal(
+      (
+        await getRunDetail(gmail.runId, db)
+      )?.steps[2].nextAttemptAt?.toISOString(),
+      "2026-10-10T12:01:00.000Z",
+    );
+    await claimNextRun(db, new Date("2026-10-10T12:01:00Z"));
+    await startGmail(gmail.runId, db);
+    assert.equal(
+      await scheduleGmailRetry(gmail.runId, "rate", "Rate limited", now, db),
+      true,
+    );
+    assert.equal(
+      (
+        await getRunDetail(gmail.runId, db)
+      )?.steps[2].nextAttemptAt?.toISOString(),
+      "2026-10-10T12:05:00.000Z",
+    );
+    await claimNextRun(db, new Date("2026-10-10T12:05:00Z"));
+    await startGmail(gmail.runId, db);
+    assert.equal(
+      await scheduleGmailRetry(gmail.runId, "rate", "Rate limited", now, db),
+      false,
+    );
+    await db.query(
+      "UPDATE step_run SET retry_mode = 'manual' WHERE run_id = $1 AND step_name = 'gmail'",
+      [gmail.runId],
+    );
+    assert.equal(
+      await scheduleGmailRetry(gmail.runId, "rate", "Rate limited", now, db),
+      false,
+    );
+    await markGmailUncertain(gmail.runId, db);
+    assert.equal(
+      (await getRunDetail(gmail.runId, db))?.state,
+      "partially_failed",
+    );
+
+    const calendar = await fixtureRun(db);
+    await claimNextRun(db);
+    await markFilterMatched(calendar.runId, db);
+    await startCalendar(calendar.runId, db);
+    assert.equal(
+      await scheduleCalendarRetry(
+        calendar.runId,
+        "rate",
+        "Rate limited",
+        now,
+        db,
+      ),
+      true,
+    );
+    assert.equal(
+      (
+        await getRunDetail(calendar.runId, db)
+      )?.steps[1].nextAttemptAt?.toISOString(),
+      "2026-10-10T12:01:00.000Z",
+    );
+    await claimNextRun(db, new Date("2026-10-10T12:01:00Z"));
+    const retryTime = new Date("2026-10-10T12:01:00Z");
+    assert.equal(await startCalendarLookup(calendar.runId, retryTime, db), 1);
+    assert.equal(
+      await scheduleCalendarLookup(
+        calendar.runId,
+        "not_found",
+        "Event not found",
+        retryTime,
+        db,
+      ),
+      true,
+    );
+    assert.equal(
+      (
+        await getRunDetail(calendar.runId, db)
+      )?.steps[1].nextAttemptAt?.toISOString(),
+      "2026-10-10T12:02:00.000Z",
+    );
+    await markCalendarUncertain(
+      calendar.runId,
+      "calendar_unresolved",
+      "Calendar outcome could not be confirmed",
+      db,
+    );
+    assert.equal((await getRunDetail(calendar.runId, db))?.state, "failed");
+
+    const found = await fixtureRun(db);
+    await claimNextRun(db);
+    await markFilterMatched(found.runId, db);
+    const foundId = await startCalendar(found.runId, db);
+    await scheduleCalendarRetry(found.runId, "rate", "Rate limited", now, db);
+    await claimNextRun(db, retryTime);
+    await finishCalendarSucceeded(found.runId, foundId, db);
+    const confirmed = await getRunDetail(found.runId, db);
+    assert.equal(confirmed?.steps[1].state, "succeeded");
+    assert.equal(confirmed?.steps[1].externalId, foundId);
+    assert.equal(confirmed?.steps[1].nextAttemptAt, null);
+    assert.equal(confirmed?.steps[1].error, null);
+  });
+});
+
+test("worker advisory lock excludes another cycle and releases after work", async () => {
+  await withSchema(async (db) => {
+    let secondRan = false;
+    const first = await withWorkerLock(db, async (assertActive) => {
+      await assertActive();
+      const second = await withWorkerLock(db, async () => {
+        secondRan = true;
+      });
+      assert.equal(second, null);
+      return "done";
+    });
+    assert.equal(first, "done");
+    assert.equal(secondRan, false);
+    assert.equal(await withWorkerLock(db, async () => "again"), "again");
+  });
+});
+
+test("Calendar lookup scheduling stops after three read-only attempts", async () => {
+  await withSchema(async (db) => {
+    const { runId } = await fixtureRun(db);
+    await claimNextRun(db);
+    await markFilterMatched(runId, db);
+    await startCalendar(runId, db);
+    const times = [
+      new Date("2026-10-10T12:00:00Z"),
+      new Date("2026-10-10T12:01:00Z"),
+      new Date("2026-10-10T12:06:00Z"),
+    ];
+    for (const [index, at] of times.entries()) {
+      assert.equal(await startCalendarLookup(runId, at, db), index + 1);
+      assert.equal(
+        await scheduleCalendarLookup(
+          runId,
+          "calendar_not_found",
+          "Calendar event not found",
+          at,
+          db,
+        ),
+        index < 2,
+      );
+    }
+    assert.equal((await getRunDetail(runId, db))?.steps[1].state, "running");
+    await markCalendarUncertain(
+      runId,
+      "calendar_unresolved",
+      "Calendar outcome could not be confirmed",
+      db,
+    );
+    const count = await db.query<{ lookup_attempt_count: number }>(
+      "SELECT lookup_attempt_count FROM step_run WHERE run_id = $1 AND step_name = 'calendar'",
+      [runId],
+    );
+    assert.equal(count.rows[0].lookup_attempt_count, 3);
+    assert.deepEqual(
+      (await getRunDetail(runId, db))?.steps.map((step) => step.state),
+      ["succeeded", "uncertain", "skipped"],
+    );
+  });
+});
+
+test("failed run success commit rolls back Gmail success and preserves uncertain boundary", async () => {
+  await withSchema(async (db) => {
+    const { runId } = await fixtureRun(db);
+    await claimNextRun(db);
+    await markFilterMatched(runId, db);
+    const eventId = await startCalendar(runId, db);
+    await finishCalendarSucceeded(runId, eventId, db);
+    await startGmail(runId, db);
+    await db.query(`CREATE FUNCTION fail_run_success() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN IF NEW.state = 'succeeded' THEN RAISE EXCEPTION 'injected failure'; END IF;
+      RETURN NEW; END $$`);
+    await db.query(
+      "CREATE TRIGGER fail_run_success BEFORE UPDATE ON run FOR EACH ROW EXECUTE FUNCTION fail_run_success()",
+    );
+    await assert.rejects(
+      finishGmailSucceeded(runId, "message-id", db),
+      /injected failure/,
+    );
+    const detail = await getRunDetail(runId, db);
+    assert.equal(detail?.state, "running");
+    assert.equal(detail?.steps[1].externalId, eventId);
+    assert.equal(detail?.steps[2].state, "running");
+    assert.equal(detail?.steps[2].externalId, null);
+  });
+});
+
+test("lost advisory-lock connection stops the current cycle", async () => {
+  await withSchema(async (db) => {
+    await assert.rejects(
+      withWorkerLock(db, async (assertActive) => {
+        const lock = await db.query<{ pid: number }>(
+          "SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND classid = 48274 AND objid = 4 AND granted",
+        );
+        assert.equal(lock.rowCount, 1);
+        await db.query("SELECT pg_terminate_backend($1)", [lock.rows[0].pid]);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        await assertActive();
+      }),
+      /Worker lock connection lost/,
+    );
+    assert.equal(
+      await withWorkerLock(db, async () => "recovered"),
+      "recovered",
+    );
   });
 });
